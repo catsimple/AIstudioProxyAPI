@@ -1,6 +1,4 @@
 import asyncio
-import base64
-import mimetypes
 from typing import Callable, List
 
 from playwright.async_api import TimeoutError
@@ -8,9 +6,15 @@ from playwright.async_api import expect as expect_async
 
 from browser_utils.operations import save_error_snapshot
 from config import (
+    CDK_OVERLAY_CONTAINER_SELECTOR,
     PROMPT_TEXTAREA_SELECTOR,
     RESPONSE_CONTAINER_SELECTOR,
     SUBMIT_BUTTON_SELECTOR,
+    UPLOAD_BUTTON_SELECTOR,
+)
+from config.selector_utils import (
+    AUTOSIZE_WRAPPER_SELECTORS,
+    build_combined_selector,
 )
 from logging_utils import set_request_id
 from models import ClientDisconnectedError
@@ -28,8 +32,16 @@ class InputController(BaseController):
         set_request_id(self.req_id)
         self.logger.info(f"填充并提交提示 ({len(prompt)} chars)...")
         prompt_textarea_locator = self.page.locator(PROMPT_TEXTAREA_SELECTOR)
+        # 使用集中管理的选择器，支持新旧 UI 结构
         autosize_wrapper_locator = self.page.locator(
-            "ms-prompt-input-wrapper ms-autosize-textarea"
+            build_combined_selector(
+                AUTOSIZE_WRAPPER_SELECTORS[:2]
+            )  # .text-wrapper 元素
+        )
+        legacy_autosize_wrapper = self.page.locator(
+            build_combined_selector(
+                AUTOSIZE_WRAPPER_SELECTORS[2:]
+            )  # ms-autosize-textarea 元素
         )
         submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
 
@@ -50,10 +62,19 @@ class InputController(BaseController):
                 """,
                 prompt,
             )
-            await autosize_wrapper_locator.evaluate(
-                '(element, text) => { element.setAttribute("data-value", text); }',
-                prompt,
-            )
+            autosize_target = autosize_wrapper_locator
+            if await autosize_target.count() == 0:
+                autosize_target = legacy_autosize_wrapper
+            if await autosize_target.count() > 0:
+                try:
+                    await autosize_target.first.evaluate(
+                        '(element, text) => { element.setAttribute("data-value", text); }',
+                        prompt,
+                    )
+                except Exception as autosize_err:
+                    self.logger.debug(
+                        f" autosize wrapper update skipped: {autosize_err}"
+                    )
             await self._check_disconnect(check_client_disconnected, "After Input Fill")
 
             # 上传（仅使用菜单 + 隐藏 input 设置文件；处理可能的授权弹窗）
@@ -162,11 +183,10 @@ class InputController(BaseController):
             except Exception:
                 pass
 
-            trigger = self.page.locator(
-                'button[aria-label="Insert assets such as images, videos, files, or audio"]'
-            )
+            trigger = self.page.locator(UPLOAD_BUTTON_SELECTOR).first
+            await expect_async(trigger).to_be_visible(timeout=3000)
             await trigger.click()
-            menu_container = self.page.locator("div.cdk-overlay-container")
+            menu_container = self.page.locator(CDK_OVERLAY_CONTAINER_SELECTOR)
             # 等待菜单显示
             try:
                 await expect_async(
@@ -239,7 +259,7 @@ class InputController(BaseController):
     async def _handle_post_upload_dialog(self):
         """处理上传后可能出现的授权/版权确认对话框，优先点击同意类按钮，不主动关闭重要对话框。"""
         try:
-            overlay_container = self.page.locator("div.cdk-overlay-container")
+            overlay_container = self.page.locator(CDK_OVERLAY_CONTAINER_SELECTOR)
             if await overlay_container.count() == 0:
                 return
 
@@ -304,153 +324,6 @@ class InputController(BaseController):
             raise
         except Exception:
             pass
-
-    async def _ensure_files_attached(
-        self, wrapper_locator, expected_min: int = 1, timeout_ms: int = 5000
-    ) -> bool:
-        """轮询检查输入区域内 file input 的 files 是否 >= 期望数量。"""
-        end = asyncio.get_event_loop().time() + (timeout_ms / 1000)
-        while asyncio.get_event_loop().time() < end:
-            try:
-                # NOTE: normalize JS eval string to avoid parser confusion
-                counts = await wrapper_locator.evaluate(
-                    """
-                    (el) => {
-                      const result = {inputs:0, chips:0, blobs:0};
-                      try { el.querySelectorAll('input[type="file"]').forEach(i => { result.inputs += (i.files ? i.files.length : 0); }); } catch(e){}
-                      try { result.chips = el.querySelectorAll('button[aria-label*="Remove" i], button[aria-label*="asset" i]').length; } catch(e){}
-                      try { result.blobs = el.querySelectorAll('img[src^="blob:"], video[src^="blob:"]').length; } catch(e){}
-                      return result;
-                    }
-                    """
-                )
-
-                total = 0
-                if isinstance(counts, dict):
-                    total = max(
-                        int(counts.get("inputs") or 0),
-                        int(counts.get("chips") or 0),
-                        int(counts.get("blobs") or 0),
-                    )
-                if total >= expected_min:
-                    self.logger.info(
-                        f" 已检测到已附加文件: inputs={counts.get('inputs')}, chips={counts.get('chips')}, blobs={counts.get('blobs')} (>= {expected_min})"
-                    )
-                    return True
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                pass
-            await asyncio.sleep(0.2)
-        self.logger.warning(f" 未能在超时内检测到已附加文件 (期望 >= {expected_min})")
-        return False
-
-    async def _simulate_drag_drop_files(
-        self, target_locator, files_list: List[str]
-    ) -> None:
-        """将本地文件以拖放事件的方式注入到目标元素。
-        仅负责触发 dragenter/dragover/drop，不在此处做附加验证以节省时间。
-        """
-        payloads = []
-        for path in files_list:
-            try:
-                with open(path, "rb") as f:
-                    raw = f.read()
-                b64 = base64.b64encode(raw).decode("ascii")
-                mime, _ = mimetypes.guess_type(path)
-                payloads.append(
-                    {
-                        "name": path.split("/")[-1],
-                        "mime": mime or "application/octet-stream",
-                        "b64": b64,
-                    }
-                )
-            except Exception as e:
-                self.logger.warning(f" 读取文件失败，跳过拖放: {path} - {e}")
-
-        if not payloads:
-            raise Exception("无可用文件用于拖放")
-
-        candidates = [
-            target_locator,
-            self.page.locator("ms-prompt-input-wrapper ms-autosize-textarea textarea"),
-            self.page.locator("ms-prompt-input-wrapper ms-autosize-textarea"),
-            self.page.locator("ms-prompt-input-wrapper"),
-        ]
-
-        last_err = None
-        for idx, cand in enumerate(candidates):
-            try:
-                await expect_async(cand).to_be_visible(timeout=3000)
-                await cand.evaluate(
-                    """
-                    (el, files) => {
-                      const dt = new DataTransfer();
-                      for (const p of files) {
-                        const bstr = atob(p.b64);
-                        const len = bstr.length;
-                        const u8 = new Uint8Array(len);
-                        for (let i = 0; i < len; i++) u8[i] = bstr.charCodeAt(i);
-                        const blob = new Blob([u8], { type: p.mime || 'application/octet-stream' });
-                        const file = new File([blob], p.name, { type: p.mime || 'application/octet-stream' });
-                        dt.items.add(file);
-                      }
-                      const evEnter = new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt });
-                      el.dispatchEvent(evEnter);
-                      const evOver = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });
-                      el.dispatchEvent(evOver);
-                      const evDrop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
-                      el.dispatchEvent(evDrop);
-                    }
-                    """,
-                    payloads,
-                )
-                await asyncio.sleep(0.5)
-                self.logger.info(
-                    f" 拖放事件已在候选目标 {idx + 1}/{len(candidates)} 上触发。"
-                )
-                return
-            except asyncio.CancelledError:
-                raise
-            except Exception as e_try:
-                last_err = e_try
-                continue
-
-        # 兜底：在 document.body 上尝试一次
-        try:
-            await self.page.evaluate(
-                """
-                (files) => {
-                  const dt = new DataTransfer();
-                  for (const p of files) {
-                    const bstr = atob(p.b64);
-                    const len = bstr.length;
-                    const u8 = new Uint8Array(len);
-                    for (let i = 0; i < len; i++) u8[i] = bstr.charCodeAt(i);
-                    const blob = new Blob([u8], { type: p.mime || 'application/octet-stream' });
-                    const file = new File([blob], p.name, { type: p.mime || 'application/octet-stream' });
-                    dt.items.add(file);
-                  }
-                  const el = document.body;
-                  const evEnter = new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt });
-                  el.dispatchEvent(evEnter);
-                  const evOver = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });
-                  el.dispatchEvent(evOver);
-                  const evDrop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
-                  el.dispatchEvent(evDrop);
-                }
-                """,
-                payloads,
-            )
-            await asyncio.sleep(0.5)
-            self.logger.info(" 拖放事件已在 document.body 上触发（兜底）。")
-            return
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            pass
-
-        raise last_err or Exception("拖放未能在任何候选目标上触发")
 
     async def _try_enter_submit(
         self, prompt_textarea_locator, check_client_disconnected: Callable

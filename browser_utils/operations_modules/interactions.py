@@ -16,6 +16,7 @@ from playwright.async_api import (
 
 from browser_utils.operations_modules.errors import save_error_snapshot
 from config import (
+    CHAT_TURN_SELECTOR,
     CLICK_TIMEOUT_MS,
     DEBUG_LOGS_ENABLED,
     INITIAL_WAIT_MS_BEFORE_POLLING,
@@ -79,11 +80,11 @@ async def get_response_via_edit_button(
 ) -> Optional[str]:
     """通过编辑按钮获取响应"""
     logger.info(" (Helper) 尝试通过编辑按钮获取响应...")
-    last_message_container = page.locator("ms-chat-turn").last
+    last_message_container = page.locator(CHAT_TURN_SELECTOR).last
     edit_button = last_message_container.get_by_label("Edit")
     finish_edit_button = last_message_container.get_by_label("Stop editing")
     autosize_textarea_locator = last_message_container.locator("ms-autosize-textarea")
-    actual_textarea_locator = autosize_textarea_locator.locator("textarea")
+    actual_textarea_locator = last_message_container.locator("textarea")
 
     try:
         logger.info("   - 尝试悬停最后一条消息以显示 'Edit' 按钮...")
@@ -115,7 +116,9 @@ async def get_response_via_edit_button(
         except asyncio.CancelledError:
             raise
         except Exception as edit_btn_err:
-            logger.error(f"   - 'Edit' 按钮不可见或点击失败: {edit_btn_err}")
+            logger.error(
+                f"   - 'Edit' 按钮不可见或点击失败: {edit_btn_err}", exc_info=True
+            )
             await save_error_snapshot(f"edit_response_edit_button_failed_{req_id}")
             return None
 
@@ -128,30 +131,38 @@ async def get_response_via_edit_button(
         textarea_failed = False
 
         try:
-            await expect_async(autosize_textarea_locator).to_be_visible(
-                timeout=CLICK_TIMEOUT_MS
-            )
-            check_client_disconnected("编辑响应 - autosize-textarea 可见后: ")
+            target_locator = autosize_textarea_locator
+            if await target_locator.count() == 0:
+                target_locator = actual_textarea_locator
 
-            try:
-                data_value_content = await autosize_textarea_locator.get_attribute(
-                    "data-value"
-                )
-                check_client_disconnected("编辑响应 - get_attribute data-value 后: ")
-                if data_value_content is not None:
-                    response_content = str(data_value_content)
-                    logger.info("   - 从 data-value 获取内容成功。")
-            except asyncio.CancelledError:
-                raise
-            except Exception as data_val_err:
-                logger.warning(f"   - 获取 data-value 失败: {data_val_err}")
-                check_client_disconnected(
-                    "编辑响应 - get_attribute data-value 错误后: "
-                )
+            if await target_locator.count() == 0:
+                raise RuntimeError("未找到可编辑的文本区域")
 
-            if response_content is None:
+            await expect_async(target_locator).to_be_visible(timeout=CLICK_TIMEOUT_MS)
+            check_client_disconnected("编辑响应 - 文本区域可见后: ")
+
+            if await autosize_textarea_locator.count() > 0 and response_content is None:
+                try:
+                    data_value_content = await autosize_textarea_locator.get_attribute(
+                        "data-value"
+                    )
+                    check_client_disconnected(
+                        "编辑响应 - get_attribute data-value 后: "
+                    )
+                    if data_value_content is not None:
+                        response_content = str(data_value_content)
+                        logger.info("   - 从 data-value 获取内容成功。")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as data_val_err:
+                    logger.warning(f"   - 获取 data-value 失败: {data_val_err}")
+                    check_client_disconnected(
+                        "编辑响应 - get_attribute data-value 错误后: "
+                    )
+
+            if response_content is None and await actual_textarea_locator.count() > 0:
                 logger.info(
-                    "   - data-value 获取失败或为None，尝试从内部 textarea 获取 input_value..."
+                    "   - data-value 获取失败或不存在，尝试从 textarea 获取 input_value..."
                 )
                 try:
                     await expect_async(actual_textarea_locator).to_be_visible(
@@ -184,7 +195,9 @@ async def get_response_via_edit_button(
         except asyncio.CancelledError:
             raise
         except Exception as textarea_err:
-            logger.error(f"   - 定位或处理文本区域时失败: {textarea_err}")
+            logger.error(
+                f"   - 定位或处理文本区域时失败: {textarea_err}", exc_info=True
+            )
             textarea_failed = True
             response_content = None
             check_client_disconnected("编辑响应 - 获取文本区域错误后: ")
@@ -231,7 +244,7 @@ async def get_response_via_copy_button(
 ) -> Optional[str]:
     """通过复制按钮获取响应"""
     logger.info(" (Helper) 尝试通过复制按钮获取响应...")
-    last_message_container = page.locator("ms-chat-turn").last
+    last_message_container = page.locator(CHAT_TURN_SELECTOR).last
     more_options_button = last_message_container.get_by_label("Open options")
     copy_markdown_button = page.get_by_role("menuitem", name="Copy markdown")
 
@@ -314,7 +327,7 @@ async def get_response_via_copy_button(
                     f"   - 读取剪贴板失败: 可能是权限问题。错误: {clipboard_err}"
                 )
             else:
-                logger.error(f"   - 读取剪贴板失败: {clipboard_err}")
+                logger.error(f"   - 读取剪贴板失败: {clipboard_err}", exc_info=True)
             await save_error_snapshot(f"copy_response_clipboard_read_failed_{req_id}")
             return None
 
@@ -336,7 +349,6 @@ async def _wait_for_response_completion(
     edit_button_locator: Locator,
     req_id: str,
     check_client_disconnected_func: Callable,
-    current_chat_id: Optional[str],
     timeout_ms=RESPONSE_COMPLETION_TIMEOUT,
     initial_wait_ms=INITIAL_WAIT_MS_BEFORE_POLLING,
 ) -> bool:
