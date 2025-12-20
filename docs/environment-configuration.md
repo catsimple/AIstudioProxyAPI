@@ -40,9 +40,6 @@ code .env
 配置完成后，启动变得非常简单：
 
 ```bash
-# 图形界面启动（推荐新手）
-python gui_launcher.py
-
 # 命令行启动（推荐日常使用）
 python launch_camoufox.py --headless
 
@@ -74,6 +71,9 @@ STREAM_PORT=3120
 ```env
 # 快速启动
 DIRECT_LAUNCH=false
+
+# 跳过前端构建检查 (适用于无 Node.js 环境或使用预构建资源)
+SKIP_FRONTEND_BUILD=false
 ```
 
 ### 代理配置
@@ -196,7 +196,10 @@ WAIT_FOR_ELEMENT_TIMEOUT_MS=10000
 PSEUDO_STREAM_DELAY=0.01
 ```
 
-### GUI 启动器配置
+### GUI 启动器配置 (已废弃)
+
+> [!WARNING]
+> GUI 启动器已移至 `deprecated/` 目录，以下配置仅供参考。
 
 ```env
 # GUI 默认代理地址
