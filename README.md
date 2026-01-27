@@ -42,11 +42,12 @@ poetry install
 
 # 2️⃣ 配置环境
 cp .env.example .env
-nano .env  # 编辑配置（可选）
+nano .env  # 设置 AUTO_SAVE_AUTH=true 以保存认证
 
 # 3️⃣ 首次认证并启动
 poetry run python launch_camoufox.py --debug  # 首次认证（需登录 Google）
-# 认证成功后，Ctrl+C 停止，然后：
+# 认证成功后，将 auth_profiles/saved/*.json 移至 auth_profiles/active/
+# 然后：
 poetry run python launch_camoufox.py --headless
 ```
 
@@ -62,7 +63,7 @@ curl http://127.0.0.1:2048/v1/models
 # 测试聊天
 curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"gemini-2.5-pro-preview","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"gemini-3-pro-preview","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
 访问 `http://127.0.0.1:2048/` 使用内置 Web UI。
