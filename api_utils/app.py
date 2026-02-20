@@ -355,7 +355,7 @@ def create_app() -> FastAPI:
     app.get("/api/info")(get_api_info)
     app.get("/health")(health_check)
     app.get("/v1/models")(list_models)
-    app.post("/v1/chat/completions")(chat_completions)
+    app.post("/v1/chat/completions", response_model=None)(chat_completions)
     app.post("/v1/cancel/{req_id}")(cancel_request)
     app.get("/v1/queue")(get_queue_status)
     app.websocket("/ws/logs")(websocket_log_endpoint)
