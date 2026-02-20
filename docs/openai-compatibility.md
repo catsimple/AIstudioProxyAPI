@@ -176,7 +176,7 @@ def chat_with_retry(client, messages, max_retries=3):
     for attempt in range(max_retries):
         try:
             return client.chat.completions.create(
-                model="gemini-2.5-pro-preview",
+                model="gemini-3-pro-preview",
                 messages=messages
             )
         except APIError:

@@ -34,7 +34,7 @@ curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key" \
   -d '{
-    "model": "gemini-1.5-pro",
+    "model": "gemini-3-pro-preview",
     "messages": [
       {
         "role": "user",
@@ -54,7 +54,7 @@ curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key" \
   -d '{
-    "model": "gemini-1.5-flash",
+    "model": "gemini-3-flash-preview",
     "messages": [
       {
         "role": "user",
@@ -71,7 +71,7 @@ curl -X POST http://127.0.0.1:2048/v1/chat/completions \
 curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-1.5-pro",
+    "model": "gemini-3-pro-preview",
     "messages": [
       {
         "role": "system",
@@ -116,7 +116,7 @@ client = OpenAI(
 # 非流式请求
 def basic_chat():
     response = client.chat.completions.create(
-        model="gemini-1.5-pro",
+        model="gemini-3-pro-preview",
         messages=[
             {"role": "system", "content": "你是一个有用的助手"},
             {"role": "user", "content": "什么是 FastAPI?"}
@@ -140,7 +140,7 @@ client = OpenAI(
 
 def streaming_chat():
     stream = client.chat.completions.create(
-        model="gemini-1.5-pro",
+        model="gemini-3-pro-preview",
         messages=[
             {"role": "user", "content": "请讲一个关于机器学习的故事"}
         ],
@@ -168,7 +168,7 @@ client = OpenAI(
 
 def advanced_chat():
     response = client.chat.completions.create(
-        model="gemini-1.5-pro",
+        model="gemini-3-pro-preview",
         messages=[
             {"role": "system", "content": "你是一个 Python 专家"},
             {"role": "user", "content": "解释装饰器的工作原理"}
@@ -202,7 +202,7 @@ def chat_with_retry(messages, max_retries=3):
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
-                model="gemini-1.5-pro",
+                model="gemini-3-pro-preview",
                 messages=messages
             )
             return response.choices[0].message.content
@@ -249,7 +249,7 @@ def chat_non_streaming():
         "Authorization": "Bearer your-api-key"
     }
     data = {
-        "model": "gemini-1.5-pro",
+        "model": "gemini-3-pro-preview",
         "messages": [
             {"role": "user", "content": "什么是深度学习?"}
         ],
@@ -280,7 +280,7 @@ def chat_streaming():
         "Authorization": "Bearer your-api-key"
     }
     data = {
-        "model": "gemini-1.5-pro",
+        "model": "gemini-3-pro-preview",
         "messages": [
             {"role": "user", "content": "请讲一个故事"}
         ],
@@ -342,7 +342,7 @@ const client = new OpenAI({
 // 非流式请求
 async function basicChat() {
   const response = await client.chat.completions.create({
-    model: "gemini-1.5-pro",
+    model: "gemini-3-pro-preview",
     messages: [
       { role: "system", content: "你是一个有用的助手" },
       { role: "user", content: "什么是 Node.js?" },
@@ -367,7 +367,7 @@ const client = new OpenAI({
 
 async function streamingChat() {
   const stream = await client.chat.completions.create({
-    model: "gemini-1.5-pro",
+    model: "gemini-3-pro-preview",
     messages: [{ role: "user", content: "请讲一个关于编程的故事" }],
     stream: true,
   });
@@ -398,7 +398,7 @@ async function chatWithRetry(messages, maxRetries = 3) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const response = await client.chat.completions.create({
-        model: "gemini-1.5-pro",
+        model: "gemini-3-pro-preview",
         messages: messages,
       });
 
@@ -443,7 +443,7 @@ async function chatNonStreaming() {
       Authorization: "Bearer your-api-key",
     },
     body: JSON.stringify({
-      model: "gemini-1.5-pro",
+      model: "gemini-3-pro-preview",
       messages: [{ role: "user", content: "什么是 JavaScript?" }],
       stream: false,
     }),
@@ -462,7 +462,7 @@ async function chatStreaming() {
       Authorization: "Bearer your-api-key",
     },
     body: JSON.stringify({
-      model: "gemini-1.5-pro",
+      model: "gemini-3-pro-preview",
       messages: [{ role: "user", content: "请讲一个故事" }],
       stream: true,
     }),
@@ -560,7 +560,7 @@ chatStreaming();
     {
       "title": "AI Studio Gemini",
       "provider": "openai",
-      "model": "gemini-1.5-pro",
+      "model": "gemini-3-pro-preview",
       "apiBase": "http://127.0.0.1:2048/v1",
       "apiKey": "your-api-key"
     }
@@ -583,7 +583,7 @@ def robust_chat(client, messages, max_retries=3):
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
-                model="gemini-1.5-pro",
+                model="gemini-3-pro-preview",
                 messages=messages,
                 timeout=60
             )
@@ -612,7 +612,7 @@ client = OpenAI(
 
 ```python
 stream = client.chat.completions.create(
-    model="gemini-1.5-pro",
+    model="gemini-3-pro-preview",
     messages=[{"role": "user", "content": "写一篇长文"}],
     stream=True
 )
@@ -630,7 +630,7 @@ for chunk in stream:
 ```python
 # 创意写作 - 高温度
 response = client.chat.completions.create(
-    model="gemini-1.5-pro",
+    model="gemini-3-pro-preview",
     messages=[{"role": "user", "content": "写一首诗"}],
     temperature=0.9,
     max_tokens=2048
@@ -638,7 +638,7 @@ response = client.chat.completions.create(
 
 # 技术问答 - 低温度
 response = client.chat.completions.create(
-    model="gemini-1.5-pro",
+    model="gemini-3-pro-preview",
     messages=[{"role": "user", "content": "什么是REST API?"}],
     temperature=0.3,
     max_tokens=1024

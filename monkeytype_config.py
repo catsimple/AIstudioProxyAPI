@@ -7,22 +7,26 @@ This config:
 - Increases query limit for comprehensive coverage
 """
 
+from types import CodeType
+from typing import Callable
+
 from monkeytype.config import DefaultConfig
 from monkeytype.typing import (
     ChainedRewriter,
     RemoveEmptyContainers,
     RewriteConfigDict,
     RewriteLargeUnion,
+    TypeRewriter,
 )
 
 
 class AIStudioProxyConfig(DefaultConfig):
     """Custom MonkeyType configuration for this project."""
 
-    def code_filter(self):
+    def code_filter(self) -> Callable[[CodeType], bool]:
         """Only trace project modules, exclude tests and external libraries."""
 
-        def should_trace(code):
+        def should_trace(code: CodeType) -> bool:
             # Normalize Windows path separators
             filename = code.co_filename.replace("\\", "/")
 
@@ -48,7 +52,7 @@ class AIStudioProxyConfig(DefaultConfig):
 
         return should_trace
 
-    def type_rewriter(self):
+    def type_rewriter(self) -> TypeRewriter:
         """Clean up generated types with chained rewriters."""
         return ChainedRewriter(
             [

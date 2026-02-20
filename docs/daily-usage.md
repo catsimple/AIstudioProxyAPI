@@ -146,14 +146,11 @@ python launch_camoufox.py --headless --stream-port 0 --helper ''
 
 在此模式下，主服务器将仅通过 Playwright 与 AI Studio 页面交互 (模拟点击"编辑"或"复制"按钮) 来获取响应。这是传统的后备方法。
 
-## 图形界面启动器 (已废弃)
+## 图形界面启动器（已移除）
 
-> [!WARNING]
-> GUI 启动器 (`gui_launcher.py`) 已移至 `deprecated/` 目录。推荐使用命令行方式 `python launch_camoufox.py`。
+项目曾提供 Tkinter GUI 启动器，但已从仓库移除。
 
-项目曾提供一个基于 Tkinter 的图形用户界面 (GUI) 启动器，但现已废弃。
-
-该工具的功能可通过以下命令行改写实现：
+请使用以下命令行方式：
 
 - **有头模式**: `python launch_camoufox.py --debug`
 - **无头模式**: `python launch_camoufox.py --headless`
@@ -176,7 +173,7 @@ python launch_camoufox.py --headless --stream-port 0 --helper ''
 
 - **日常使用**: 配置好 `.env` 文件后，使用简单的 `python launch_camoufox.py --headless` 即可
 - **临时调整**: 需要临时修改配置时，使用命令行参数覆盖，无需修改 `.env` 文件
-- **首次设置**: 推荐使用 GUI 的"创建新认证文件"功能，或者使用 `python launch_camoufox.py --debug` 手动设置
+- **首次设置**: 使用 `python launch_camoufox.py --debug` 手动完成认证
 
 **只有当你确认使用调试模式一切运行正常（特别是浏览器内的登录和认证保存），并且 `auth_profiles/active/` 目录下有有效的认证文件后，才推荐使用无头模式作为日常后台运行的标准方式。**
 

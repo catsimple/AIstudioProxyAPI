@@ -1,18 +1,20 @@
 from asyncio import Queue
-from typing import Any, Dict
+from asyncio import Task
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 
 from config import get_environment_variable
 
+from ..context_types import QueueItem, ServerStateSnapshot
 from ..dependencies import get_request_queue, get_server_state, get_worker_task
 
 
 async def health_check(
-    server_state: Dict[str, Any] = Depends(get_server_state),
-    worker_task=Depends(get_worker_task),
-    request_queue: Queue = Depends(get_request_queue),
+    server_state: ServerStateSnapshot = Depends(get_server_state),
+    worker_task: Optional[Task[None]] = Depends(get_worker_task),
+    request_queue: "Queue[QueueItem]" = Depends(get_request_queue),
 ) -> JSONResponse:
     is_worker_running = bool(worker_task and not worker_task.done())
     launch_mode = get_environment_variable("LAUNCH_MODE", "unknown")
@@ -31,7 +33,7 @@ async def health_check(
     status_val = "OK" if is_core_ready and is_worker_running else "Error"
     q_size = request_queue.qsize() if request_queue else -1
 
-    status_message_parts = []
+    status_message_parts: List[str] = []
     if server_state["is_initializing"]:
         status_message_parts.append("初始化进行中")
     if not server_state["is_playwright_ready"]:
@@ -44,16 +46,20 @@ async def health_check(
     if not is_worker_running:
         status_message_parts.append("Worker 未运行")
 
-    status = {
+    details: Dict[str, Any] = {
+        "is_initializing": server_state["is_initializing"],
+        "is_playwright_ready": server_state["is_playwright_ready"],
+        "is_browser_connected": server_state["is_browser_connected"],
+        "is_page_ready": server_state["is_page_ready"],
+        "workerRunning": is_worker_running,
+        "queueLength": q_size,
+        "launchMode": launch_mode,
+        "browserAndPageCritical": browser_page_critical,
+    }
+    status: Dict[str, Any] = {
         "status": status_val,
         "message": "",
-        "details": {
-            **server_state,
-            "workerRunning": is_worker_running,
-            "queueLength": q_size,
-            "launchMode": launch_mode,
-            "browserAndPageCritical": browser_page_critical,
-        },
+        "details": details,
     }
 
     if status_val == "OK":

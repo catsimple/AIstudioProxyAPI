@@ -1,11 +1,10 @@
 import asyncio
-from typing import Callable
 
-from playwright.async_api import TimeoutError
+from playwright.async_api import Locator, TimeoutError
 from playwright.async_api import expect as expect_async
 
 from browser_utils.initialization import enable_temporary_chat_mode
-from browser_utils.operations import save_error_snapshot
+from browser_utils.operations_modules.errors import save_error_snapshot
 from config import (
     CLEAR_CHAT_BUTTON_SELECTOR,
     CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR,
@@ -18,13 +17,15 @@ from config import (
 )
 from models import ClientDisconnectedError
 
-from .base import BaseController
+from .base import BaseController, DisconnectCheck
 
 
 class ChatController(BaseController):
     """Handles chat history management."""
 
-    async def clear_chat_history(self, check_client_disconnected: Callable):
+    async def clear_chat_history(
+        self, check_client_disconnected: DisconnectCheck
+    ) -> None:
         """清空聊天记录。"""
         self.logger.debug("[Chat] 开始清空聊天记录")
         await self._check_disconnect(check_client_disconnected, "Start Clear Chat")
@@ -127,11 +128,11 @@ class ChatController(BaseController):
 
     async def _execute_chat_clear(
         self,
-        clear_chat_button_locator,
-        confirm_button_locator,
-        overlay_locator,
-        check_client_disconnected: Callable,
-    ):
+        clear_chat_button_locator: Locator,
+        confirm_button_locator: Locator,
+        overlay_locator: Locator,
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """执行清空聊天操作"""
         overlay_initially_visible = False
         try:
@@ -139,8 +140,6 @@ class ChatController(BaseController):
                 overlay_initially_visible = True
                 self.logger.debug("[Chat] 确认对话框已可见，直接点击“继续”")
         except TimeoutError:
-            overlay_initially_visible = False
-        except Exception:
             overlay_initially_visible = False
         except Exception as e_vis_check:
             self.logger.warning(
@@ -318,7 +317,7 @@ class ChatController(BaseController):
                 else:
                     raise
 
-    async def _dismiss_backdrops(self):
+    async def _dismiss_backdrops(self) -> None:
         """尝试关闭可能残留的 cdk 透明遮罩层以避免点击被拦截。"""
         try:
             backdrop = self.page.locator(
@@ -355,7 +354,9 @@ class ChatController(BaseController):
         except Exception:
             pass
 
-    async def _verify_chat_cleared(self, check_client_disconnected: Callable):
+    async def _verify_chat_cleared(
+        self, check_client_disconnected: DisconnectCheck
+    ) -> None:
         """验证聊天已清空"""
         last_response_container = self.page.locator(RESPONSE_CONTAINER_SELECTOR).last
         await self._check_disconnect(

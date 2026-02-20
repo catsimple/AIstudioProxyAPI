@@ -9,7 +9,6 @@
 **配置方式**:
 - **环境变量**: `.env` 文件中设置 `PORT=2048`
 - **命令行参数**: `--server-port 2048`
-- **GUI 启动器**: 图形界面直接配置
 
 ---
 
@@ -79,7 +78,7 @@ X-API-Key: your-api-key
 curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-2.5-pro-preview",
+    "model": "gemini-3-pro-preview",
     "messages": [{"role": "user", "content": "Hello"}],
     "temperature": 0.7
   }'
@@ -88,7 +87,7 @@ curl -X POST http://127.0.0.1:2048/v1/chat/completions \
 curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-2.5-pro-preview",
+    "model": "gemini-3-flash-preview",
     "messages": [{"role": "user", "content": "讲个故事"}],
     "stream": true
   }' --no-buffer
@@ -130,6 +129,8 @@ curl -X POST http://127.0.0.1:2048/v1/chat/completions \
 | `/v1/cancel/{req_id}` | POST | 取消请求 |
 | `/ws/logs` | WebSocket | 实时日志流 |
 | `/api/keys` | GET/POST/DELETE | 密钥管理 |
+| `/api/model-capabilities` | GET | 获取所有模型能力配置 |
+| `/api/model-capabilities/{model_id}` | GET | 获取指定模型能力详情 |
 
 ---
 
@@ -146,7 +147,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gemini-2.5-pro-preview",
+    model="gemini-3-pro-preview",
     messages=[{"role": "user", "content": "Hello"}]
 )
 print(response.choices[0].message.content)
@@ -163,7 +164,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: "gemini-2.5-pro-preview",
+  model: "gemini-3-flash-preview",
   messages: [{ role: "user", content: "Hello" }]
 });
 console.log(response.choices[0].message.content);

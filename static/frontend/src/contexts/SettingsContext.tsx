@@ -106,7 +106,7 @@ function loadSettings(): ModelSettings {
     // If current version, just merge with defaults
     if (storedVersion === SCHEMA_VERSION) {
       // Remove internal fields before merging
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       const { _version, ...settings } = parsed;
       return { ...defaultSettings, ...settings };
     }

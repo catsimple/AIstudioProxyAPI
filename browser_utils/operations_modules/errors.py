@@ -6,9 +6,10 @@ import traceback
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from playwright.async_api import Error as PlaywrightAsyncError
+from playwright.async_api import Locator
 from playwright.async_api import Page as AsyncPage
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
@@ -106,7 +107,7 @@ async def save_minimal_snapshot(
     req_id: str = "unknown",
     error_category: Optional[ErrorCategory] = None,
     error_exception: Optional[BaseException] = None,
-    additional_context: Optional[dict] = None,
+    additional_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     保存最小化错误快照 (无需浏览器/页面)。
@@ -148,7 +149,7 @@ async def save_minimal_snapshot(
             error_category = categorize_error(error_exception)
 
         # === 1. 构建详细元数据 ===
-        metadata: dict = {
+        metadata: Dict[str, Any] = {
             "snapshot_info": {
                 "type": "minimal",
                 "reason": "Browser/page unavailable",
@@ -270,13 +271,16 @@ async def save_minimal_snapshot(
         ]
 
         if error_exception:
+            traceback_text = str(
+                metadata.get("exception", {}).get("traceback", "")
+            )
             summary_lines.extend(
                 [
                     f"Type: {type(error_exception).__name__}",
                     f"Message: {error_exception}",
                     "",
                     "Traceback:",
-                    metadata["exception"]["traceback"],
+                    traceback_text,
                 ]
             )
         else:
@@ -328,9 +332,9 @@ async def save_error_snapshot(
     error_name: str = "error",
     error_exception: Optional[Exception] = None,
     error_stage: str = "",
-    additional_context: Optional[dict] = None,
-    locators: Optional[dict] = None,
-):
+    additional_context: Optional[Dict[str, Any]] = None,
+    locators: Optional[Dict[str, Locator]] = None,
+) -> None:
     """
     保存错误快照 (Robust wrapper with guaranteed save).
 
@@ -362,7 +366,7 @@ async def save_error_snapshot(
             return
 
     # 添加分类到上下文
-    context = additional_context.copy() if additional_context else {}
+    context: Dict[str, Any] = dict(additional_context) if additional_context else {}
     if error_category:
         context["error_category"] = error_category.value
 

@@ -34,41 +34,38 @@ import styles from './ChatPanel.module.css';
  * Returns: { liveMs, finalMs, displayMs } where displayMs shows live during active, final after.
  */
 function useElapsedTimer(isActive: boolean): { liveMs: number; finalMs: number; displayMs: number } {
-  const startTimeRef = useRef<number | null>(null);
   const [liveMs, setLiveMs] = useState(0);
   const [finalMs, setFinalMs] = useState(0);
-  const wasActiveRef = useRef(false);
+  const [startTime, setStartTime] = useState<number | null>(null);
 
-  // Handle activation/deactivation
+  // Handle activation - start timer
   useEffect(() => {
-    if (isActive && !wasActiveRef.current) {
-      // Just became active - start timer
-      startTimeRef.current = Date.now();
+    if (isActive) {
+      setStartTime(Date.now());
       setLiveMs(0);
-    } else if (!isActive && wasActiveRef.current) {
-      // Just became inactive - capture final time
-      if (startTimeRef.current !== null) {
-        const elapsed = Date.now() - startTimeRef.current;
-        setFinalMs(elapsed);
-        setLiveMs(elapsed);
-        startTimeRef.current = null;
-      }
     }
-    wasActiveRef.current = isActive;
   }, [isActive]);
+
+  // Handle deactivation - capture final time
+  useEffect(() => {
+    if (!isActive && startTime !== null) {
+      const elapsed = Date.now() - startTime;
+      setFinalMs(elapsed);
+      setLiveMs(elapsed);
+      setStartTime(null);
+    }
+  }, [isActive, startTime]);
 
   // Tick interval while active
   useEffect(() => {
-    if (!isActive || startTimeRef.current === null) return;
-    
+    if (!isActive || startTime === null) return;
+
     const interval = setInterval(() => {
-      if (startTimeRef.current !== null) {
-        setLiveMs(Date.now() - startTimeRef.current);
-      }
-    }, 100); // Update every 100ms for smooth display
-    
+      setLiveMs(Date.now() - startTime);
+    }, 100);
+
     return () => clearInterval(interval);
-  }, [isActive]);
+  }, [isActive, startTime]);
 
   // displayMs: live while active, final after
   const displayMs = isActive ? liveMs : finalMs;
@@ -224,25 +221,27 @@ function Message({
   // Thinking section state - auto-expand while thinking, auto-collapse when done
   const hasThinking = Boolean(message.thinkingContent);
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(message.isThinking ?? false);
-  
+
   // Timer hooks - track total streaming duration and thinking duration
-  // The hook now returns displayMs which shows live during active, final after
   const isCurrentlyStreaming = message.isStreaming === true;
   const streamingTimer = useElapsedTimer(isCurrentlyStreaming);
-  
+
   const isActivelyThinking = message.isThinking === true;
   const thinkingTimer = useElapsedTimer(isActivelyThinking);
-  
+
   // Convert to seconds for display (minimum 1s if any time recorded)
   const totalSeconds = streamingTimer.displayMs > 0 ? Math.max(1, Math.floor(streamingTimer.displayMs / 1000)) : 0;
   const thinkingSeconds = thinkingTimer.displayMs > 0 ? Math.max(1, Math.floor(thinkingTimer.displayMs / 1000)) : 0;
-  
-  // Auto-collapse thinking when thinking phase ends
+
+  // Auto-expand when thinking starts, auto-collapse when done
   useEffect(() => {
     if (message.isThinking) {
       setIsThinkingExpanded(true);
-    } else if (hasThinking && !message.isStreaming) {
-      // Thinking done and streaming finished - collapse
+    }
+  }, [message.isThinking]);
+
+  useEffect(() => {
+    if (!message.isThinking && !message.isStreaming && hasThinking) {
       setIsThinkingExpanded(false);
     }
   }, [message.isThinking, message.isStreaming, hasThinking]);

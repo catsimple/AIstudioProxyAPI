@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, TypedDict, cast
 
 from config import (
     DEBUG_LOGS_ENABLED,
@@ -15,7 +15,31 @@ from config import (
 logger = logging.getLogger("AIStudioProxyServer")
 
 
-def _parse_userscript_models(script_content: str):
+class UserscriptModel(TypedDict):
+    name: str
+    displayName: str
+    description: str
+
+
+class ParsedModelEntry(TypedDict):
+    id: str
+    object: str
+    created: int
+    owned_by: str
+    display_name: str
+    description: str
+    raw_model_path: str
+    default_temperature: float
+    default_max_output_tokens: Optional[int]
+    supported_max_output_tokens: Optional[int]
+    default_top_p: Optional[float]
+
+
+class InjectedModelEntry(ParsedModelEntry):
+    injected: bool
+
+
+def _parse_userscript_models(script_content: str) -> List[UserscriptModel]:
     """从油猴脚本中解析模型列表 - 使用JSON解析方式"""
     try:
         # 查找脚本版本号
@@ -54,9 +78,9 @@ def _parse_userscript_models(script_content: str):
         # 4. 解析JSON
         import json
 
-        models_data = json.loads(models_js_code)
+        models_data = cast(List[Any], json.loads(models_js_code))
 
-        models = []
+        models: List[UserscriptModel] = []
         for model_obj in models_data:
             if isinstance(model_obj, dict) and "name" in model_obj:
                 models.append(
@@ -75,7 +99,7 @@ def _parse_userscript_models(script_content: str):
         return []
 
 
-def _get_injected_models():
+def _get_injected_models() -> List[InjectedModelEntry]:
     """从油猴脚本中获取注入的模型列表，转换为API格式"""
     try:
         # 直接读取环境变量，避免复杂的导入
@@ -105,9 +129,9 @@ def _get_injected_models():
             return []
 
         # 转换为API格式
-        injected_models = []
+        injected_models: List[InjectedModelEntry] = []
         for model in models:
-            model_name = model.get("name", "")
+            model_name = model["name"]
             if not model_name:
                 continue  # 跳过没有名称的模型
 
@@ -116,14 +140,12 @@ def _get_injected_models():
             else:
                 simple_id = model_name
 
-            display_name = model.get(
-                "displayName", model.get("display_name", simple_id)
-            )
-            description = model.get("description", f"Injected model: {simple_id}")
+            display_name = model["displayName"] or simple_id
+            description = model["description"] or f"Injected model: {simple_id}"
 
             # 注意：不再清理显示名称，保留原始的emoji和版本信息
 
-            model_entry = {
+            model_entry: InjectedModelEntry = {
                 "id": simple_id,
                 "object": "model",
                 "created": int(time.time()),
@@ -151,10 +173,8 @@ async def _handle_model_list_response(response: Any):
     # 需要访问全局变量
     from api_utils.server_state import state
 
-    getattr(state, "global_model_list_raw_json", None)
-    getattr(state, "parsed_model_list", [])
-    model_list_fetch_event = getattr(state, "model_list_fetch_event", None)
-    excluded_model_ids = getattr(state, "excluded_model_ids", set())
+    model_list_fetch_event = state.model_list_fetch_event
+    excluded_model_ids: Set[str] = state.excluded_model_ids
 
     if MODELS_ENDPOINT_URL_CONTAINS in response.url and response.ok:
         # 检查是否在登录流程中
@@ -169,8 +189,8 @@ async def _handle_model_list_response(response: Any):
         else:
             logger.debug(f"[Network] 捕获模型列表响应 ({response.status} OK)")
         try:
-            data = await response.json()
-            models_array_container = None
+            data: Any = await response.json()
+            models_array_container: Optional[List[Any]] = None
             if isinstance(data, list) and data:
                 if (
                     isinstance(data[0], list)
@@ -195,9 +215,9 @@ async def _handle_model_list_response(response: Any):
                     )
             elif isinstance(data, dict):
                 if "data" in data and isinstance(data["data"], list):
-                    models_array_container = data["data"]
+                    models_array_container = cast(List[Any], data["data"])
                 elif "models" in data and isinstance(data["models"], list):
-                    models_array_container = data["models"]
+                    models_array_container = cast(List[Any], data["models"])
                 else:
                     for key, value in data.items():
                         if (
@@ -205,7 +225,7 @@ async def _handle_model_list_response(response: Any):
                             and len(value) > 0
                             and isinstance(value[0], (dict, list))
                         ):
-                            models_array_container = value
+                            models_array_container = cast(List[Any], value)
                             logger.info(
                                 f"模型列表数据在 '{key}' 键下通过启发式搜索找到。"
                             )
@@ -227,10 +247,10 @@ async def _handle_model_list_response(response: Any):
                 return
 
             if models_array_container is not None:
-                new_parsed_list = []
+                new_parsed_list: List[ParsedModelEntry] = []
                 excluded_during_parse: list[str] = []  # 收集被排除的模型ID
                 for entry_in_container in models_array_container:
-                    model_fields_list = None
+                    model_fields_list: Optional[Any] = None
                     if isinstance(entry_in_container, dict):
                         potential_id = entry_in_container.get(
                             "id",
@@ -239,11 +259,13 @@ async def _handle_model_list_response(response: Any):
                             ),
                         )
                         if potential_id:
-                            model_fields_list = entry_in_container
+                            model_fields_list = cast(Dict[str, Any], entry_in_container)
                         else:
-                            model_fields_list = list(entry_in_container.values())
+                            model_fields_list = list(
+                                cast(Dict[str, Any], entry_in_container).values()
+                            )
                     elif isinstance(entry_in_container, list):
-                        model_fields_list = entry_in_container
+                        model_fields_list = cast(List[Any], entry_in_container)
                     else:
                         logger.debug(
                             f"Skipping entry of unknown type: {type(entry_in_container)}"
@@ -426,7 +448,7 @@ async def _handle_model_list_response(response: Any):
                             if display_name_candidate
                             else simple_model_id_str.replace("-", " ").title()
                         )
-                        model_entry_dict = {
+                        model_entry_dict: ParsedModelEntry = {
                             "id": simple_model_id_str,
                             "object": "model",
                             "created": int(time.time()),
@@ -471,15 +493,19 @@ async def _handle_model_list_response(response: Any):
                     # 因为如果前端没有通过网络拦截注入，说明前端页面上没有这些模型
                     # 后端返回这些模型也无法实际使用，所以只依赖网络拦截注入
 
-                    state.parsed_model_list = sorted(
-                        new_parsed_list, key=lambda m: m.get("display_name", "").lower()
+                    state.parsed_model_list = cast(
+                        List[Dict[str, Any]],
+                        sorted(
+                            new_parsed_list,
+                            key=lambda model: model.get("display_name", "").lower(),
+                        ),
                     )
                     state.global_model_list_raw_json = json.dumps(
                         {"data": state.parsed_model_list, "object": "list"}
                     )
                     if DEBUG_LOGS_ENABLED:
                         # Only print full model list on first load or count change
-                        previous_count = getattr(state, "_last_model_count", 0) or 0
+                        previous_count = state.last_model_count
                         current_count = len(state.parsed_model_list)
                         if previous_count != current_count or previous_count == 0:
                             # Only show detailed parsing info when list changes
@@ -493,7 +519,7 @@ async def _handle_model_list_response(response: Any):
                             ):
                                 log_output += f"  {i + 1}. {item.get('id')} (MaxTok={item.get('default_max_output_tokens')})\n"
                             logger.debug(log_output.rstrip())
-                            state._last_model_count = current_count  # type: ignore
+                            state.last_model_count = current_count
                         else:
                             logger.debug(f"[Model] 列表无变化 ({current_count} 个)")
                     else:

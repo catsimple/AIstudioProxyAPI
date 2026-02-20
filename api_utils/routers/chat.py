@@ -2,16 +2,17 @@ import asyncio
 import logging
 import random
 import time
-from asyncio import Future, Queue
-from typing import Any
+from asyncio import Future, Queue, Task
+from typing import Union
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from config import RESPONSE_COMPLETION_TIMEOUT, get_environment_variable
 from logging_utils import set_request_id, set_source
 from models import ChatCompletionRequest
 
+from ..context_types import QueueItem, ServerStateSnapshot
 from ..dependencies import (
     get_logger,
     get_request_queue,
@@ -25,10 +26,10 @@ async def chat_completions(
     request: ChatCompletionRequest,
     http_request: Request,
     logger: logging.Logger = Depends(get_logger),
-    request_queue: "Queue[Any]" = Depends(get_request_queue),
-    server_state: dict = Depends(get_server_state),  # pyright: ignore[reportMissingTypeArgument]
-    worker_task: Any = Depends(get_worker_task),
-) -> JSONResponse:
+    request_queue: "Queue[QueueItem]" = Depends(get_request_queue),
+    server_state: ServerStateSnapshot = Depends(get_server_state),
+    worker_task: Union[Task[None], None] = Depends(get_worker_task),
+) -> Union[JSONResponse, StreamingResponse]:
     req_id = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=7))
 
     # 设置日志上下文 (Grid Logger)
@@ -57,8 +58,8 @@ async def chat_completions(
     if is_service_unavailable:
         raise service_unavailable(req_id)
 
-    result_future = Future()
-    queue_item = {
+    result_future: "Future[Union[JSONResponse, StreamingResponse]]" = Future()
+    queue_item: QueueItem = {
         "req_id": req_id,
         "request_data": request,
         "http_request": http_request,

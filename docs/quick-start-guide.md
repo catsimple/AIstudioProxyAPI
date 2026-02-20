@@ -298,7 +298,13 @@ curl http://127.0.0.1:2048/v1/models
   "object": "list",
   "data": [
     {
-      "id": "gemini-1.5-pro",
+      "id": "gemini-3-pro-preview",
+      "object": "model",
+      "created": 1699999999,
+      "owned_by": "google"
+    },
+    {
+      "id": "gemini-3-flash-preview",
       "object": "model",
       "created": 1699999999,
       "owned_by": "google"
@@ -316,7 +322,7 @@ curl http://127.0.0.1:2048/v1/models
 curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-1.5-pro",
+    "model": "gemini-3-pro-preview",
     "messages": [
       {"role": "user", "content": "Hello, how are you?"}
     ],
@@ -330,7 +336,7 @@ curl -X POST http://127.0.0.1:2048/v1/chat/completions \
 curl -X POST http://127.0.0.1:2048/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-1.5-pro",
+    "model": "gemini-3-flash-preview",
     "messages": [
       {"role": "user", "content": "Tell me a short story"}
     ],

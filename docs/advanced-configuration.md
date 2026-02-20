@@ -132,8 +132,8 @@ openssl rsa -in certs/ca.key -out certs/ca.key
 每行一个模型 ID，例如：
 
 ```
-gemini-1.0-pro
-gemini-1.0-pro-vision
+gemini-1.5-pro
+gemini-1.5-flash
 deprecated-model-id
 ```
 
@@ -234,27 +234,6 @@ python launch_camoufox.py --headless --skip-frontend-build
   "matchers": [{ "pattern": "gemini-3.*-flash", "category": "gemini3Flash" }]
 }
 ```
-
-## GUI 启动器高级功能
-
-### 本地 LLM 模拟服务
-
-GUI 集成了启动和管理一个本地 LLM 模拟服务的功能：
-
-- **功能**: 监听 `11434` 端口，模拟部分 Ollama API 端点和 OpenAI 兼容的 `/v1/chat/completions` 端点
-- **启动**: 在 GUI 的"启动选项"区域，点击"启动本地 LLM 模拟服务"按钮
-- **依赖检测**: 启动前会自动检测 `localhost:2048` 端口是否可用
-- **用途**: 主要用于测试客户端与 Ollama 或 OpenAI 兼容 API 的对接
-
-### 端口进程管理
-
-GUI 提供端口进程管理功能：
-
-- 查询指定端口上当前正在运行的进程
-- 选择并尝试停止在指定端口上找到的进程
-- 手动输入 PID 终止进程
-
-**安全机制**：进程终止功能会验证 PID 是否属于配置的端口（FastAPI、Camoufox、Stream Proxy），防止意外终止无关进程。
 
 ## 环境变量配置
 

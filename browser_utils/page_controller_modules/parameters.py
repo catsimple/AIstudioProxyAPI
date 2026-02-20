@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Union, cast
 
 from playwright.async_api import expect as expect_async
 
@@ -21,7 +21,7 @@ from config import (
 )
 from models import ClientDisconnectedError
 
-from .base import BaseController
+from .base import BaseController, DisconnectCheck
 
 
 class ParameterController(BaseController):
@@ -34,8 +34,8 @@ class ParameterController(BaseController):
         params_cache_lock: asyncio.Lock,
         model_id_to_use: Optional[str],
         parsed_model_list: List[Dict[str, Any]],
-        check_client_disconnected: Callable,
-    ):
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """调整所有请求参数。"""
         await self._check_disconnect(
             check_client_disconnected, "Start Parameter Adjustment"
@@ -108,10 +108,10 @@ class ParameterController(BaseController):
     async def _adjust_temperature(
         self,
         temperature: float,
-        page_params_cache: dict,
+        page_params_cache: Dict[str, Any],
         params_cache_lock: asyncio.Lock,
-        check_client_disconnected: Callable,
-    ):
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """调整温度参数。"""
         async with params_cache_lock:
             clamped_temp = max(0.0, min(2.0, temperature))
@@ -201,12 +201,12 @@ class ParameterController(BaseController):
     async def _adjust_max_tokens(
         self,
         max_tokens: int,
-        page_params_cache: dict,
+        page_params_cache: Dict[str, Any],
         params_cache_lock: asyncio.Lock,
         model_id_to_use: Optional[str],
-        parsed_model_list: list,
-        check_client_disconnected: Callable,
-    ):
+        parsed_model_list: List[Dict[str, Any]],
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """调整最大输出Token参数。"""
         async with params_cache_lock:
             min_val_for_tokens = 1
@@ -324,7 +324,7 @@ class ParameterController(BaseController):
                 if isinstance(e, ClientDisconnectedError):
                     raise
 
-    async def _get_current_stop_sequences(self) -> set:
+    async def _get_current_stop_sequences(self) -> Set[str]:
         """从页面读取当前显示的停止序列 (基于移除按钮的 aria-label)。"""
         try:
             # 策略：遍历所有 mat-chip 内的移除按钮
@@ -336,7 +336,7 @@ class ParameterController(BaseController):
                 'mat-chip button.remove-button[aria-label*="Remove"]'
             )
             count = await remove_btns.count()
-            current_stops = set()
+            current_stops: Set[str] = set()
 
             for i in range(count):
                 label = await remove_btns.nth(i).get_attribute("aria-label")
@@ -360,11 +360,11 @@ class ParameterController(BaseController):
 
     async def _adjust_stop_sequences(
         self,
-        stop_sequences,
-        page_params_cache: dict,
+        stop_sequences: Optional[Union[str, List[str]]],
+        page_params_cache: Dict[str, Any],
         params_cache_lock: asyncio.Lock,
-        check_client_disconnected: Callable,
-    ):
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """Adjust stop sequences parameter with Silent Success pattern."""
         async with params_cache_lock:
             self.logger.debug(
@@ -372,15 +372,15 @@ class ParameterController(BaseController):
             )
 
             # Normalize input to set
-            normalized_requested_stops: set = set()
+            normalized_requested_stops: Set[str] = set()
             if stop_sequences is not None:
                 if isinstance(stop_sequences, str):
-                    if stop_sequences.strip():
-                        normalized_requested_stops.add(stop_sequences.strip())
-                elif isinstance(stop_sequences, list):
-                    for s in stop_sequences:
-                        if isinstance(s, str) and s.strip():
-                            normalized_requested_stops.add(s.strip())
+                    stop_sequences_list = [stop_sequences]
+                else:
+                    stop_sequences_list = stop_sequences
+                for stop_item in stop_sequences_list:
+                    if stop_item.strip():
+                        normalized_requested_stops.add(stop_item.strip())
 
             self.logger.debug(f"[Param] 规范化后: {normalized_requested_stops}")
 
@@ -493,7 +493,9 @@ class ParameterController(BaseController):
                 if isinstance(e, ClientDisconnectedError):
                     raise
 
-    async def _adjust_top_p(self, top_p: float, check_client_disconnected: Callable):
+    async def _adjust_top_p(
+        self, top_p: float, check_client_disconnected: DisconnectCheck
+    ) -> None:
         """调整Top P参数。"""
         clamped_top_p = max(0.0, min(1.0, top_p))
 
@@ -555,7 +557,9 @@ class ParameterController(BaseController):
             if isinstance(e, ClientDisconnectedError):
                 raise
 
-    async def _ensure_tools_panel_expanded(self, check_client_disconnected: Callable):
+    async def _ensure_tools_panel_expanded(
+        self, check_client_disconnected: DisconnectCheck
+    ) -> None:
         """确保包含高级工具（URL上下文、思考预算等）的面板是展开的。"""
         self.logger.debug("[Param] 检查工具面板状态...")
         try:
@@ -590,7 +594,9 @@ class ParameterController(BaseController):
             if isinstance(e, ClientDisconnectedError):
                 raise
 
-    async def _open_url_content(self, check_client_disconnected: Callable):
+    async def _open_url_content(
+        self, check_client_disconnected: DisconnectCheck
+    ) -> None:
         """仅负责打开 URL Context 开关，前提是面板已展开。"""
         try:
             self.logger.info("检查并启用 URL Context 开关...")
@@ -616,16 +622,22 @@ class ParameterController(BaseController):
 
     def _should_enable_google_search(self, request_params: Dict[str, Any]) -> bool:
         """Determine if Google Search should be enabled based on request or defaults."""
-        if "tools" in request_params and request_params.get("tools") is not None:
-            tools = request_params.get("tools")
+        tools = request_params.get("tools")
+        if tools is not None:
             has_google_search_tool = False
             if isinstance(tools, list):
-                for tool in tools:
-                    if isinstance(tool, dict):
+                for tool_candidate in cast(List[Any], tools):
+                    if isinstance(tool_candidate, dict):
+                        tool = cast(Dict[str, Any], tool_candidate)
                         if tool.get("google_search_retrieval") is not None:
                             has_google_search_tool = True
                             break
-                        if tool.get("function", {}).get("name") == "googleSearch":
+                        function_payload = tool.get("function")
+                        if (
+                            isinstance(function_payload, dict)
+                            and cast(Dict[str, Any], function_payload).get("name")
+                            == "googleSearch"
+                        ):
                             has_google_search_tool = True
                             break
             self.logger.debug(
@@ -654,8 +666,8 @@ class ParameterController(BaseController):
         self,
         request_params: Dict[str, Any],
         model_id: Optional[str],
-        check_client_disconnected: Callable,
-    ):
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """Adjust Google Search toggle with Silent Success pattern."""
         # Check if model supports Google Search before attempting toggle
         if not self._supports_google_search(model_id):

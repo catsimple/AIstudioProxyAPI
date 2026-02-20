@@ -4,7 +4,6 @@
 
 [![Star History Chart](https://api.star-history.com/svg?repos=CJackHwang/AIstudioProxyAPI&type=Date)](https://www.star-history.com/#CJackHwang/AIstudioProxyAPI&Date)
 
-> 本项目由 [ZMTO](https://zmto.com/) 慷慨赞助服务器支持。
 
 ---
 

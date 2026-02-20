@@ -10,6 +10,7 @@
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -24,14 +25,14 @@ _REACT_DIST = _BASE_DIR / "static" / "frontend" / "dist"
 _REACT_ASSETS = _REACT_DIST / "assets"
 
 
-def get_static_files_app() -> StaticFiles | None:
+def get_static_files_app() -> Optional[StaticFiles]:
     """
     Create a StaticFiles app for the assets directory.
 
     Returns None if the directory doesn't exist (frontend not built).
     """
     if _REACT_ASSETS.exists():
-        return StaticFiles(directory=str(_REACT_ASSETS))
+        return StaticFiles(directory=str(_REACT_ASSETS), check_dir=False)
     return None
 
 

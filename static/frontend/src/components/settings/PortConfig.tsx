@@ -19,6 +19,7 @@ export function PortConfiguration() {
     stream_proxy_enabled: true,
   });
   const [hasChanges, setHasChanges] = useState(false);
+  const [configInitialized, setConfigInitialized] = useState(false);
 
   // Fetch current config
   const { data: config, isLoading } = useQuery({
@@ -26,13 +27,14 @@ export function PortConfiguration() {
     queryFn: fetchPortConfig,
   });
 
-  // Update local state when config loads
+  // Sync local state when config loads (using effect properly)
   useEffect(() => {
-    if (config) {
+    if (config && !configInitialized) {
       setLocalConfig(config);
       setHasChanges(false);
+      setConfigInitialized(true);
     }
-  }, [config]);
+  }, [config, configInitialized]);
 
   // Update config mutation
   const updateMutation = useMutation({

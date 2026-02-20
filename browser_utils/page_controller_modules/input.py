@@ -1,10 +1,11 @@
 import asyncio
-from typing import Callable, List
+from typing import List, cast
 
+from playwright.async_api import Locator
 from playwright.async_api import TimeoutError
 from playwright.async_api import expect as expect_async
 
-from browser_utils.operations import save_error_snapshot
+from browser_utils.operations_modules.errors import save_error_snapshot
 from config import (
     CDK_OVERLAY_CONTAINER_SELECTOR,
     PROMPT_TEXTAREA_SELECTOR,
@@ -19,15 +20,18 @@ from config.selector_utils import (
 from logging_utils import set_request_id
 from models import ClientDisconnectedError
 
-from .base import BaseController
+from .base import BaseController, DisconnectCheck
 
 
 class InputController(BaseController):
     """Handles prompt input and submission."""
 
     async def submit_prompt(
-        self, prompt: str, image_list: List, check_client_disconnected: Callable
-    ):
+        self,
+        prompt: str,
+        image_list: List[str],
+        check_client_disconnected: DisconnectCheck,
+    ) -> None:
         """提交提示到页面。"""
         set_request_id(self.req_id)
         self.logger.debug(f"[Input] 填充提示词 ({len(prompt)} chars)")
@@ -280,7 +284,7 @@ class InputController(BaseController):
             self.logger.error(f"通过上传菜单设置文件失败: {e}")
             return False
 
-    async def _handle_post_upload_dialog(self):
+    async def _handle_post_upload_dialog(self) -> None:
         """处理上传后可能出现的授权/版权确认对话框，优先点击同意类按钮，不主动关闭重要对话框。"""
         try:
             overlay_container = self.page.locator(CDK_OVERLAY_CONTAINER_SELECTOR)
@@ -349,7 +353,7 @@ class InputController(BaseController):
         except Exception:
             pass
 
-    async def _dismiss_tooltip_overlays(self):
+    async def _dismiss_tooltip_overlays(self) -> None:
         """关闭可能阻挡点击的 tooltip 弹出层 - 直接从 DOM 移除。"""
         try:
             # 首先尝试移动鼠标让 tooltip 自然消失
@@ -357,7 +361,9 @@ class InputController(BaseController):
             await asyncio.sleep(0.1)
 
             # 然后用 JavaScript 强制删除所有可能阻挡的 tooltip/overlay 元素
-            removed_count = await self.page.evaluate("""
+            removed_count = cast(
+                int,
+                await self.page.evaluate("""
                 () => {
                     const selectors = [
                         '.mdc-tooltip',
@@ -378,7 +384,8 @@ class InputController(BaseController):
                     }
                     return count;
                 }
-            """)
+            """),
+            )
             if removed_count > 0:
                 self.logger.debug(f"[Input] 移除了 {removed_count} 个 tooltip 元素")
                 await asyncio.sleep(0.1)
@@ -387,7 +394,7 @@ class InputController(BaseController):
         except Exception as e:
             self.logger.debug(f"[Input] tooltip 清理时发生异常: {e}")
 
-    async def _js_click_submit_button(self, submit_button_locator) -> bool:
+    async def _js_click_submit_button(self, submit_button_locator: Locator) -> bool:
         """使用 JavaScript 直接触发提交按钮点击事件。"""
         try:
             # 获取按钮元素并用 JS 点击
@@ -401,7 +408,9 @@ class InputController(BaseController):
             return False
 
     async def _try_enter_submit(
-        self, prompt_textarea_locator, check_client_disconnected: Callable
+        self,
+        prompt_textarea_locator: Locator,
+        check_client_disconnected: DisconnectCheck,
     ) -> bool:
         """优先使用回车键提交。"""
         import os
@@ -509,7 +518,9 @@ class InputController(BaseController):
             return False
 
     async def _try_combo_submit(
-        self, prompt_textarea_locator, check_client_disconnected: Callable
+        self,
+        prompt_textarea_locator: Locator,
+        check_client_disconnected: DisconnectCheck,
     ) -> bool:
         """尝试使用组合键提交 (Meta/Control + Enter)。"""
         import os

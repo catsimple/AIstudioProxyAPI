@@ -26,6 +26,15 @@ class QueueItem(TypedDict):
     cancelled: bool
 
 
+class ServerStateSnapshot(TypedDict):
+    """Immutable snapshot of service readiness flags."""
+
+    is_initializing: bool
+    is_playwright_ready: bool
+    is_browser_connected: bool
+    is_page_ready: bool
+
+
 class RequestContext(TypedDict):
     """Request context with all keys always present after initialization.
 

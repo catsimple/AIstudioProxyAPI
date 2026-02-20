@@ -118,8 +118,7 @@ AIstudioProxyAPI/
 │
 ├── server.py                   # 应用入口点
 ├── launch_camoufox.py          # 命令行启动器（主入口）
-├── deprecated/                 # 已废弃的模块
-│   └── gui_launcher.py         # [已废弃] GUI 启动器
+├── deprecated/                 # （已移除）历史废弃目录
 └── pyproject.toml              # Poetry 配置
 ```
 

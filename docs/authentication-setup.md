@@ -66,21 +66,13 @@ python launch_camoufox.py --debug --server-port 2048 --stream-port 0 --helper ''
 6.  **激活文件**: **将 `auth_profiles/saved/` 下新生成的 `.json` 文件移动到 `auth_profiles/active/` 目录。** 确保 `active` 目录下只有一个 `.json` 文件。
 7.  可以按 `Ctrl+C` 停止 `--debug` 模式的运行。
 
-## 方法二：通过 GUI 启动有头模式 (已废弃)
+## 方法二：通过命令行启动有头模式（推荐）
 
-> [!WARNING]
-> GUI 启动器 (`gui_launcher.py`) 已移至 `deprecated/` 目录。请使用上面的命令行方式。
+GUI 启动器已从仓库移除，请统一使用命令行：
 
-以下步骤仅供参考，不再推荐使用：
-
-1.  运行 `python deprecated/gui_launcher.py`。
-2.  在 "认证文件管理" 区域，点击 **"管理认证文件"** 按钮。
-3.  在弹出的窗口中，点击 **"创建新认证文件"** 按钮。
-4.  输入想要保存的文件名（例如 `account1`），点击确定。
-5.  在弹出的浏览器窗口中完成 Google 登录。
-6.  登录成功后，认证文件会自动保存到 `auth_profiles/saved/` 目录。
-7.  回到 GUI 主界面，再次点击 **"管理认证文件"** 按钮。
-8.  在列表中选择刚才创建的文件，点击 **"激活选中的文件"**。这会自动将其移动到 `active` 目录。
+1.  运行 `python launch_camoufox.py --debug`。
+2.  在打开的浏览器中完成 Google 登录。
+3.  登录完成后，将新生成的认证文件放入 `auth_profiles/active/`。
 
 ## 激活认证文件
 

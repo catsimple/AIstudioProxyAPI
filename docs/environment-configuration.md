@@ -199,22 +199,6 @@ WAIT_FOR_ELEMENT_TIMEOUT_MS=10000
 PSEUDO_STREAM_DELAY=0.01
 ```
 
-### GUI 启动器配置 (已废弃)
-
-> [!WARNING]
-> GUI 启动器已移至 `deprecated/` 目录，以下配置仅供参考。
-
-```env
-# GUI 默认代理地址
-GUI_DEFAULT_PROXY_ADDRESS=http://127.0.0.1:7890
-
-# GUI 默认流式代理端口
-GUI_DEFAULT_STREAM_PORT=3120
-
-# GUI 默认 Helper 端点
-GUI_DEFAULT_HELPER_ENDPOINT=
-```
-
 ### 脚本注入配置
 
 ```env
@@ -241,12 +225,12 @@ USERSCRIPT_PATH=browser_utils/more_models.js
 ### 场景 1：使用代理
 
 ```env
-# 启用代理
+# 统一代理配置（推荐）
+UNIFIED_PROXY_CONFIG=http://127.0.0.1:7890
+
+# 或使用传统配置
 HTTP_PROXY=http://127.0.0.1:7890
 HTTPS_PROXY=http://127.0.0.1:7890
-
-# GUI 中也使用相同代理
-GUI_DEFAULT_PROXY_ADDRESS=http://127.0.0.1:7890
 ```
 
 ### 场景 2：调试模式
@@ -372,7 +356,7 @@ STREAM_PORT=3120
 ### 端口冲突
 
 1. 检查端口是否被其他程序占用
-2. 使用 GUI 启动器的端口检查功能
+2. 使用 `lsof -i :端口号` 或 `netstat` 检查端口占用
 3. 修改为其他可用端口
 
 ## 更多信息

@@ -24,9 +24,8 @@ _SERVER_START_TIME: Optional[float] = None
 
 def _init_start_time() -> None:
     """Initialize server start time (called once at startup)."""
-    global _SERVER_START_TIME
     if _SERVER_START_TIME is None:
-        _SERVER_START_TIME = time.time()
+        globals()["_SERVER_START_TIME"] = time.time()
 
 
 _init_start_time()
@@ -60,7 +59,7 @@ def _format_uptime(seconds: float) -> str:
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
 
-    parts = []
+    parts: list[str] = []
     if days > 0:
         parts.append(f"{days}天")
     if hours > 0:

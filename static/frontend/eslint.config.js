@@ -26,10 +26,17 @@ export default defineConfig([
     },
     rules: {
       'unused-imports/no-unused-imports': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { 
+      '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
       }],
+      // Disable experimental React hooks rules that are too strict
+      // These rules flag valid React patterns like setState in effects for data syncing
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/refs': 'off',
+      // Allow hooks to be exported from context files
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
 ])

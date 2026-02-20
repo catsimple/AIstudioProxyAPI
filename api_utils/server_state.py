@@ -66,6 +66,7 @@ class ServerState:
         # --- Model State ---
         self.global_model_list_raw_json: Optional[str] = None
         self.parsed_model_list: List[Dict[str, Any]] = []
+        self.last_model_count: int = 0
         self.model_list_fetch_event: Event = asyncio.Event()
         self.current_ai_studio_model_id: Optional[str] = None
         self.model_switching_lock: Optional[Lock] = None
