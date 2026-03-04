@@ -3,9 +3,8 @@ import asyncio
 import json
 import logging
 import os
-import re
 import time
-from typing import Any, Dict, List, Optional, Set, TypedDict, cast
+from typing import Any
 
 from config import (
     DEBUG_LOGS_ENABLED,
@@ -15,182 +14,33 @@ from config import (
 logger = logging.getLogger("AIStudioProxyServer")
 
 
-class UserscriptModel(TypedDict):
-    name: str
-    displayName: str
-    description: str
-
-
-class ParsedModelEntry(TypedDict):
-    id: str
-    object: str
-    created: int
-    owned_by: str
-    display_name: str
-    description: str
-    raw_model_path: str
-    default_temperature: float
-    default_max_output_tokens: Optional[int]
-    supported_max_output_tokens: Optional[int]
-    default_top_p: Optional[float]
-
-
-class InjectedModelEntry(ParsedModelEntry):
-    injected: bool
-
-
-def _parse_userscript_models(script_content: str) -> List[UserscriptModel]:
-    """从油猴脚本中解析模型列表 - 使用JSON解析方式"""
-    try:
-        # 查找脚本版本号
-        version_pattern = r'const\s+SCRIPT_VERSION\s*=\s*[\'"]([^\'"]+)[\'"]'
-        version_match = re.search(version_pattern, script_content)
-        script_version = version_match.group(1) if version_match else "v1.6"
-
-        # 查找 MODELS_TO_INJECT 数组的内容
-        models_array_pattern = r"const\s+MODELS_TO_INJECT\s*=\s*(\[.*?\]);"
-        models_match = re.search(models_array_pattern, script_content, re.DOTALL)
-
-        if not models_match:
-            logger.warning("未找到 MODELS_TO_INJECT 数组")
-            return []
-
-        models_js_code = models_match.group(1)
-
-        # 将JavaScript数组转换为JSON格式
-        # 1. 替换模板字符串中的变量
-        models_js_code = models_js_code.replace("${SCRIPT_VERSION}", script_version)
-
-        # 2. 移除JavaScript注释
-        models_js_code = re.sub(r"//.*?$", "", models_js_code, flags=re.MULTILINE)
-
-        # 3. 将JavaScript对象转换为JSON格式
-        # 移除尾随逗号
-        models_js_code = re.sub(r",\s*([}\]])", r"\1", models_js_code)
-
-        # 替换单引号为双引号
-        models_js_code = re.sub(r"(\w+):\s*'([^']*)'", r'"\1": "\2"', models_js_code)
-        # 替换反引号为双引号
-        models_js_code = re.sub(r"(\w+):\s*`([^`]*)`", r'"\1": "\2"', models_js_code)
-        # 确保属性名用双引号
-        models_js_code = re.sub(r"(\w+):", r'"\1":', models_js_code)
-
-        # 4. 解析JSON
-        import json
-
-        models_data = cast(List[Any], json.loads(models_js_code))
-
-        models: List[UserscriptModel] = []
-        for model_obj in models_data:
-            if isinstance(model_obj, dict) and "name" in model_obj:
-                models.append(
-                    {
-                        "name": model_obj.get("name", ""),
-                        "displayName": model_obj.get("displayName", ""),
-                        "description": model_obj.get("description", ""),
-                    }
-                )
-
-        logger.info(f"成功解析 {len(models)} 个模型从油猴脚本")
-        return models
-
-    except Exception as e:
-        logger.error(f"解析油猴脚本模型列表失败: {e}", exc_info=True)
-        return []
-
-
-def _get_injected_models() -> List[InjectedModelEntry]:
-    """从油猴脚本中获取注入的模型列表，转换为API格式"""
-    try:
-        # 直接读取环境变量，避免复杂的导入
-        enable_injection = os.environ.get(
-            "ENABLE_SCRIPT_INJECTION", "true"
-        ).lower() in ("true", "1", "yes")
-
-        if not enable_injection:
-            return []
-
-        # 获取脚本文件路径
-        script_path = os.environ.get("USERSCRIPT_PATH", "browser_utils/more_models.js")
-
-        # 检查脚本文件是否存在
-        if not os.path.exists(script_path):
-            # 脚本文件不存在，静默返回空列表
-            return []
-
-        # 读取油猴脚本内容
-        with open(script_path, "r", encoding="utf-8") as f:
-            script_content = f.read()
-
-        # 从脚本中解析模型列表
-        models = _parse_userscript_models(script_content)
-
-        if not models:
-            return []
-
-        # 转换为API格式
-        injected_models: List[InjectedModelEntry] = []
-        for model in models:
-            model_name = model["name"]
-            if not model_name:
-                continue  # 跳过没有名称的模型
-
-            if model_name.startswith("models/"):
-                simple_id = model_name[7:]  # 移除 'models/' 前缀
-            else:
-                simple_id = model_name
-
-            display_name = model["displayName"] or simple_id
-            description = model["description"] or f"Injected model: {simple_id}"
-
-            # 注意：不再清理显示名称，保留原始的emoji和版本信息
-
-            model_entry: InjectedModelEntry = {
-                "id": simple_id,
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "ai_studio_injected",
-                "display_name": display_name,
-                "description": description,
-                "raw_model_path": model_name,
-                "default_temperature": 1.0,
-                "default_max_output_tokens": 65536,
-                "supported_max_output_tokens": 65536,
-                "default_top_p": 0.95,
-                "injected": True,  # 标记为注入的模型
-            }
-            injected_models.append(model_entry)
-
-        return injected_models
-
-    except Exception:
-        # 静默处理错误，不输出日志，返回空列表
-        return []
-
-
 async def _handle_model_list_response(response: Any):
-    """处理模型列表响应"""
-    # 需要访问全局变量
+    """Handle model list response"""
+    # Need to access global variables
     from api_utils.server_state import state
 
-    model_list_fetch_event = state.model_list_fetch_event
-    excluded_model_ids: Set[str] = state.excluded_model_ids
+    getattr(state, "global_model_list_raw_json", None)
+    getattr(state, "parsed_model_list", [])
+    model_list_fetch_event = getattr(state, "model_list_fetch_event", None)
+    excluded_model_ids = getattr(state, "excluded_model_ids", set())
 
     if MODELS_ENDPOINT_URL_CONTAINS in response.url and response.ok:
-        # 检查是否在登录流程中
+        # Check if in login flow
         launch_mode = os.environ.get("LAUNCH_MODE", "debug")
         is_in_login_flow = launch_mode in ["debug"] and not getattr(
             state, "is_page_ready", False
         )
 
         if is_in_login_flow:
-            # 在登录流程中，静默处理，不输出干扰信息
-            pass  # 静默处理，避免干扰用户输入
+            # During login flow, handle silently to avoid interfering with user input
+            pass  # Silent handling to avoid interfering with user input
         else:
-            logger.debug(f"[Network] 捕获模型列表响应 ({response.status} OK)")
+            logger.debug(
+                f"[Network] Captured model list response ({response.status} OK)"
+            )
         try:
-            data: Any = await response.json()
-            models_array_container: Optional[List[Any]] = None
+            data = await response.json()
+            models_array_container = None
             if isinstance(data, list) and data:
                 if (
                     isinstance(data[0], list)
@@ -211,13 +61,13 @@ async def _handle_model_list_response(response: Any):
                     models_array_container = data
                 else:
                     logger.warning(
-                        f"未知的列表嵌套结构。data[0] 类型: {type(data[0]) if data else 'N/A'}。data[0] 预览: {str(data[0])[:200] if data else 'N/A'}"
+                        f"Unknown list nesting structure. data[0] type: {type(data[0]) if data else 'N/A'}. data[0] preview: {str(data[0])[:200] if data else 'N/A'}"
                     )
             elif isinstance(data, dict):
                 if "data" in data and isinstance(data["data"], list):
-                    models_array_container = cast(List[Any], data["data"])
+                    models_array_container = data["data"]
                 elif "models" in data and isinstance(data["models"], list):
-                    models_array_container = cast(List[Any], data["models"])
+                    models_array_container = data["models"]
                 else:
                     for key, value in data.items():
                         if (
@@ -225,13 +75,15 @@ async def _handle_model_list_response(response: Any):
                             and len(value) > 0
                             and isinstance(value[0], (dict, list))
                         ):
-                            models_array_container = cast(List[Any], value)
+                            models_array_container = value
                             logger.info(
-                                f"模型列表数据在 '{key}' 键下通过启发式搜索找到。"
+                                f"Model list data found under '{key}' key via heuristic search."
                             )
                             break
                     if models_array_container is None:
-                        logger.warning("在字典响应中未能自动定位模型列表数组。")
+                        logger.warning(
+                            "Could not auto-locate model list array in dict response."
+                        )
                         if (
                             model_list_fetch_event
                             and not model_list_fetch_event.is_set()
@@ -240,17 +92,17 @@ async def _handle_model_list_response(response: Any):
                         return
             else:
                 logger.warning(
-                    f"接收到的模型列表数据既不是列表也不是字典: {type(data)}"
+                    f"Received model list data is neither list nor dict: {type(data)}"
                 )
                 if model_list_fetch_event and not model_list_fetch_event.is_set():
                     model_list_fetch_event.set()
                 return
 
             if models_array_container is not None:
-                new_parsed_list: List[ParsedModelEntry] = []
-                excluded_during_parse: list[str] = []  # 收集被排除的模型ID
+                new_parsed_list = []
+                excluded_during_parse: list[str] = []  # Collect excluded model IDs
                 for entry_in_container in models_array_container:
-                    model_fields_list: Optional[Any] = None
+                    model_fields_list = None
                     if isinstance(entry_in_container, dict):
                         potential_id = entry_in_container.get(
                             "id",
@@ -259,13 +111,11 @@ async def _handle_model_list_response(response: Any):
                             ),
                         )
                         if potential_id:
-                            model_fields_list = cast(Dict[str, Any], entry_in_container)
+                            model_fields_list = entry_in_container
                         else:
-                            model_fields_list = list(
-                                cast(Dict[str, Any], entry_in_container).values()
-                            )
+                            model_fields_list = list(entry_in_container.values())
                     elif isinstance(entry_in_container, list):
-                        model_fields_list = cast(List[Any], entry_in_container)
+                        model_fields_list = entry_in_container
                     else:
                         logger.debug(
                             f"Skipping entry of unknown type: {type(entry_in_container)}"
@@ -324,7 +174,7 @@ async def _handle_model_list_response(response: Any):
                                     supported_max_output_tokens_val = val_int
                                 except (ValueError, TypeError):
                                     logger.warning(
-                                        f"模型 {current_model_id_for_log}: 无法将列表索引6的值 '{model_fields_list[6]}' 解析为 max_output_tokens。"
+                                        f"Model {current_model_id_for_log}: Cannot parse list index 6 value '{model_fields_list[6]}' as max_output_tokens."
                                     )
 
                             if (
@@ -335,7 +185,7 @@ async def _handle_model_list_response(response: Any):
                                     raw_top_p = float(model_fields_list[9])
                                     if not (0.0 <= raw_top_p <= 1.0):
                                         logger.warning(
-                                            f"模型 {current_model_id_for_log}: 原始 top_p值 {raw_top_p} (来自列表索引9) 超出 [0,1] 范围，将裁剪。"
+                                            f"Model {current_model_id_for_log}: Raw top_p value {raw_top_p} (from list index 9) exceeds [0,1] range, will be clipped."
                                         )
                                         default_top_p_val = max(
                                             0.0, min(1.0, raw_top_p)
@@ -344,7 +194,7 @@ async def _handle_model_list_response(response: Any):
                                         default_top_p_val = raw_top_p
                                 except (ValueError, TypeError):
                                     logger.warning(
-                                        f"模型 {current_model_id_for_log}: 无法将列表索引9的值 '{model_fields_list[9]}' 解析为 top_p。"
+                                        f"Model {current_model_id_for_log}: Cannot parse list index 9 value '{model_fields_list[9]}' as top_p."
                                     )
 
                         elif isinstance(model_fields_list, dict):
@@ -388,7 +238,7 @@ async def _handle_model_list_response(response: Any):
                                     supported_max_output_tokens_val = val_int
                                 except (ValueError, TypeError):
                                     logger.warning(
-                                        f"模型 {current_model_id_for_log}: 无法将字典值 '{mot_parsed}' 解析为 max_output_tokens。"
+                                        f"Model {current_model_id_for_log}: Cannot parse dict value '{mot_parsed}' as max_output_tokens."
                                     )
 
                             top_p_parsed = model_fields_list.get(
@@ -399,7 +249,7 @@ async def _handle_model_list_response(response: Any):
                                     raw_top_p = float(top_p_parsed)
                                     if not (0.0 <= raw_top_p <= 1.0):
                                         logger.warning(
-                                            f"模型 {current_model_id_for_log}: 原始 top_p值 {raw_top_p} (来自字典) 超出 [0,1] 范围，将裁剪。"
+                                            f"Model {current_model_id_for_log}: Raw top_p value {raw_top_p} (from dict) exceeds [0,1] range, will be clipped."
                                         )
                                         default_top_p_val = max(
                                             0.0, min(1.0, raw_top_p)
@@ -408,7 +258,7 @@ async def _handle_model_list_response(response: Any):
                                         default_top_p_val = raw_top_p
                                 except (ValueError, TypeError):
                                     logger.warning(
-                                        f"模型 {current_model_id_for_log}: 无法将字典值 '{top_p_parsed}' 解析为 top_p。"
+                                        f"Model {current_model_id_for_log}: Cannot parse dict value '{top_p_parsed}' as top_p."
                                     )
 
                             temp_parsed = model_fields_list.get(
@@ -420,7 +270,7 @@ async def _handle_model_list_response(response: Any):
                                     default_temperature_val = float(temp_parsed)
                                 except (ValueError, TypeError):
                                     logger.warning(
-                                        f"模型 {current_model_id_for_log}: 无法将字典值 '{temp_parsed}' 解析为 temperature。"
+                                        f"Model {current_model_id_for_log}: Cannot parse dict value '{temp_parsed}' as temperature."
                                     )
                         else:
                             logger.debug(
@@ -429,7 +279,7 @@ async def _handle_model_list_response(response: Any):
                             continue
                     except Exception as e_parse_fields:
                         logger.error(
-                            f"解析模型字段时出错 for entry {str(entry_in_container)[:100]}: {e_parse_fields}"
+                            f"Error parsing model fields for entry {str(entry_in_container)[:100]}: {e_parse_fields}"
                         )
                         continue
 
@@ -448,7 +298,7 @@ async def _handle_model_list_response(response: Any):
                             if display_name_candidate
                             else simple_model_id_str.replace("-", " ").title()
                         )
-                        model_entry_dict: ParsedModelEntry = {
+                        model_entry_dict = {
                             "id": simple_model_id_str,
                             "object": "model",
                             "created": int(time.time()),
@@ -473,7 +323,7 @@ async def _handle_model_list_response(response: Any):
                 )
 
                 if new_parsed_list:
-                    # 检查是否已经有通过网络拦截注入的模型
+                    # Check if network interception already injected models
                     has_network_injected_models = False
                     if models_array_container:
                         for entry_in_container in models_array_container:
@@ -481,37 +331,39 @@ async def _handle_model_list_response(response: Any):
                                 isinstance(entry_in_container, list)
                                 and len(entry_in_container) > 10
                             ):
-                                # 检查是否有网络注入标记
+                                # Check for network injection marker
                                 if "__NETWORK_INJECTED__" in entry_in_container:
                                     has_network_injected_models = True
                                     break
 
                     if has_network_injected_models and not is_in_login_flow:
-                        logger.info("检测到网络拦截已注入模型")
+                        logger.info(
+                            "Detected network interception already injected models"
+                        )
 
-                    # 注意：不再在后端添加注入模型
-                    # 因为如果前端没有通过网络拦截注入，说明前端页面上没有这些模型
-                    # 后端返回这些模型也无法实际使用，所以只依赖网络拦截注入
+                    # Note: No longer adding injected models on backend
+                    # If frontend didn't inject via network interception, these models won't be usable anyway
+                    # So we only rely on network interception for injection
 
-                    state.parsed_model_list = cast(
-                        List[Dict[str, Any]],
-                        sorted(
-                            new_parsed_list,
-                            key=lambda model: model.get("display_name", "").lower(),
-                        ),
+                    state.parsed_model_list = sorted(
+                        new_parsed_list, key=lambda m: m.get("display_name", "").lower()
                     )
                     state.global_model_list_raw_json = json.dumps(
                         {"data": state.parsed_model_list, "object": "list"}
                     )
                     if DEBUG_LOGS_ENABLED:
                         # Only print full model list on first load or count change
-                        previous_count = state.last_model_count
+                        previous_count = getattr(state, "_last_model_count", 0) or 0
                         current_count = len(state.parsed_model_list)
                         if previous_count != current_count or previous_count == 0:
                             # Only show detailed parsing info when list changes
                             if excluded_count > 0 and not is_in_login_flow:
-                                logger.debug(f"[Model] 已排除 {excluded_count} 个模型")
-                            log_output = f"[Model] 列表更新: {current_count} 个模型\n"
+                                logger.debug(
+                                    f"[Model] Excluded {excluded_count} models"
+                                )
+                            log_output = (
+                                f"[Model] List updated: {current_count} models\n"
+                            )
                             for i, item in enumerate(
                                 state.parsed_model_list[
                                     : min(3, len(state.parsed_model_list))
@@ -519,32 +371,38 @@ async def _handle_model_list_response(response: Any):
                             ):
                                 log_output += f"  {i + 1}. {item.get('id')} (MaxTok={item.get('default_max_output_tokens')})\n"
                             logger.debug(log_output.rstrip())
-                            state.last_model_count = current_count
+                            state._last_model_count = current_count  # type: ignore
                         else:
-                            logger.debug(f"[Model] 列表无变化 ({current_count} 个)")
+                            logger.debug(f"[Model] List unchanged ({current_count})")
                     else:
                         logger.info(
-                            f"[模型] 列表已更新 (共 {len(state.parsed_model_list)} 个模型)"
+                            f"[Model] List updated (total {len(state.parsed_model_list)} models)"
                         )
                     if model_list_fetch_event and not model_list_fetch_event.is_set():
                         model_list_fetch_event.set()
                 elif not state.parsed_model_list:
-                    logger.warning("解析后模型列表仍然为空。")
+                    logger.warning("Model list still empty after parsing.")
                     if model_list_fetch_event and not model_list_fetch_event.is_set():
                         model_list_fetch_event.set()
             else:
-                logger.warning("models_array_container 为 None，无法解析模型列表。")
+                logger.warning(
+                    "models_array_container is None, cannot parse model list."
+                )
                 if model_list_fetch_event and not model_list_fetch_event.is_set():
                     model_list_fetch_event.set()
         except json.JSONDecodeError as json_err:
             logger.error(
-                f"解析模型列表JSON失败: {json_err}. 响应 (前500字): {await response.text()[:500]}"
+                f"Failed to parse model list JSON: {json_err}. Response (first 500 chars): {await response.text()[:500]}"
             )
         except asyncio.CancelledError:
             raise
         except Exception as e_handle_list_resp:
-            logger.exception(f"处理模型列表响应时发生未知错误: {e_handle_list_resp}")
+            logger.exception(
+                f"Unknown error processing model list response: {e_handle_list_resp}"
+            )
         finally:
             if model_list_fetch_event and not model_list_fetch_event.is_set():
-                logger.info("处理模型列表响应结束，强制设置 model_list_fetch_event。")
+                logger.info(
+                    "Finished processing model list response, forcing model_list_fetch_event set."
+                )
                 model_list_fetch_event.set()

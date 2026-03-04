@@ -1,6 +1,6 @@
 """
-主要设置配置模块
-包含环境变量配置、路径配置、代理配置等运行时设置
+Main Settings Configuration Module
+Contains runtime settings such as environment variable configuration, path configuration, proxy configuration, etc.
 """
 
 import os
@@ -8,10 +8,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# 加载 .env 文件
+# Load .env file
 load_dotenv()
 
-# --- 全局日志控制配置 ---
+# --- Global Log Control Configuration ---
 DEBUG_LOGS_ENABLED = os.environ.get("DEBUG_LOGS_ENABLED", "false").lower() in (
     "true",
     "1",
@@ -34,11 +34,16 @@ LOG_FILE_MAX_BYTES = int(
 )  # 10MB default
 LOG_FILE_BACKUP_COUNT = int(os.environ.get("LOG_FILE_BACKUP_COUNT", "5"))
 
-# --- 认证相关配置 ---
+# --- Auth Related Configuration ---
 AUTO_SAVE_AUTH = os.environ.get("AUTO_SAVE_AUTH", "").lower() in ("1", "true", "yes")
 AUTH_SAVE_TIMEOUT = int(os.environ.get("AUTH_SAVE_TIMEOUT", "30"))
+AUTO_CONFIRM_LOGIN = os.environ.get("AUTO_CONFIRM_LOGIN", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
-# --- 路径配置 (使用 pathlib) ---
+# --- Path Configuration (Using pathlib) ---
 _CONFIG_DIR = Path(__file__).parent
 _PROJECT_ROOT = _CONFIG_DIR.parent
 
@@ -51,12 +56,12 @@ UPLOAD_FILES_DIR = str(_PROJECT_ROOT / "upload_files")
 
 
 def get_environment_variable(key: str, default: str = "") -> str:
-    """获取环境变量值"""
+    """Get environment variable value"""
     return os.environ.get(key, default)
 
 
 def get_boolean_env(key: str, default: bool = False) -> bool:
-    """获取布尔型环境变量"""
+    """Get boolean environment variable"""
     value = os.environ.get(key, "").lower()
     if default:
         return value not in ("false", "0", "no", "off")
@@ -65,27 +70,140 @@ def get_boolean_env(key: str, default: bool = False) -> bool:
 
 
 def get_int_env(key: str, default: int = 0) -> int:
-    """获取整型环境变量"""
+    """Get integer environment variable"""
     try:
         return int(os.environ.get(key, str(default)))
     except (ValueError, TypeError):
         return default
 
 
-# --- 代理配置 ---
-# 注意：代理配置现在在 api_utils/app.py 中动态设置，根据 STREAM_PORT 环境变量决定
+# --- Proxy Configuration ---
 NO_PROXY_ENV = os.environ.get("NO_PROXY")
 
-# --- 脚本注入配置 ---
-ENABLE_SCRIPT_INJECTION = get_boolean_env("ENABLE_SCRIPT_INJECTION", False)
+# --- Script Injection Configuration ---
+ENABLE_SCRIPT_INJECTION = get_boolean_env("ENABLE_SCRIPT_INJECTION", True)
+NETWORK_INTERCEPTION_ENABLED = get_boolean_env("NETWORK_INTERCEPTION_ENABLED", True)
+USERSCRIPT_PATH = os.environ.get(
+    "USERSCRIPT_PATH", str(_PROJECT_ROOT / "browser_utils" / "more_models.js")
+)
 ONLY_COLLECT_CURRENT_USER_ATTACHMENTS = get_boolean_env(
     "ONLY_COLLECT_CURRENT_USER_ATTACHMENTS", False
 )
-USERSCRIPT_PATH = get_environment_variable(
-    "USERSCRIPT_PATH", "browser_utils/more_models.js"
-)
-# 注意：MODEL_CONFIG_PATH 已废弃，现在直接从油猴脚本解析模型数据
 
-# --- MCP 配置 ---
-MCP_HTTP_ENDPOINT = get_environment_variable("MCP_HTTP_ENDPOINT", "")
-MCP_HTTP_TIMEOUT = float(os.environ.get("MCP_HTTP_TIMEOUT", "15"))
+# --- Response Integrity Verification Configuration ---
+EMERGENCY_WAIT_SECONDS = get_int_env("EMERGENCY_WAIT_SECONDS", 3)
+
+# --- Thinking Budget Configuration ---
+DISABLE_THINKING_BUDGET_ON_STREAMING_DISABLE = get_boolean_env(
+    "DISABLE_THINKING_BUDGET_ON_STREAMING_DISABLE", default=True
+)
+
+# --- Proactive Rotation Configuration ---
+QUOTA_SOFT_LIMIT = get_int_env("QUOTA_SOFT_LIMIT", 650000)
+QUOTA_HARD_LIMIT = get_int_env("QUOTA_HARD_LIMIT", 800000)
+
+MODEL_QUOTA_LIMITS = {}
+for key, value in os.environ.items():
+    if key.upper().startswith("QUOTA_LIMIT_"):
+        try:
+            model_id = key[12:].lower()
+            MODEL_QUOTA_LIMITS[model_id] = int(value)
+        except ValueError:
+            continue
+
+PROACTIVE_ROTATION_TOKEN_LIMIT = QUOTA_HARD_LIMIT
+
+# --- Dynamic Rotation Guard Configuration ---
+HIGH_TRAFFIC_QUEUE_THRESHOLD = get_int_env("HIGH_TRAFFIC_QUEUE_THRESHOLD", 5)
+ROTATION_DEPLETION_GUARD_HIGH_TRAFFIC = get_int_env(
+    "ROTATION_DEPLETION_GUARD_HIGH_TRAFFIC", 10
+)
+
+# --- Granular Configuration for Auth and Budget ---
+AUTO_ROTATE_AUTH_PROFILE = get_boolean_env("AUTO_ROTATE_AUTH_PROFILE", True)
+
+
+def _get_thinking_budget_value(env_key: str, default: int, level_name: str) -> int:
+    try:
+        value = get_int_env(env_key, default)
+        if value <= 0:
+            return default
+        return value
+    except (ValueError, TypeError):
+        return default
+
+
+THINKING_BUDGET_LOW = _get_thinking_budget_value("THINKING_BUDGET_LOW", 8000, "LOW")
+THINKING_BUDGET_MEDIUM = _get_thinking_budget_value(
+    "THINKING_BUDGET_MEDIUM", 16000, "MEDIUM"
+)
+THINKING_BUDGET_HIGH = _get_thinking_budget_value("THINKING_BUDGET_HIGH", 32000, "HIGH")
+
+DEFAULT_THINKING_LEVEL = os.environ.get("DEFAULT_THINKING_LEVEL", "low")
+
+# --- Function Calling Configuration ---
+# Mode: "emulated" | "native" | "auto"
+# - "emulated": Current text-based approach (default, backwards compatible)
+# - "native": AI Studio UI-driven function calling
+# - "auto": Native with automatic fallback to emulated on failure
+FUNCTION_CALLING_MODE = os.environ.get("FUNCTION_CALLING_MODE", "emulated").lower()
+
+# Enable automatic fallback to emulated mode when native mode fails
+FUNCTION_CALLING_NATIVE_FALLBACK = get_boolean_env(
+    "FUNCTION_CALLING_NATIVE_FALLBACK", True
+)
+
+# Timeout for function calling UI operations (milliseconds)
+FUNCTION_CALLING_UI_TIMEOUT = get_int_env("FUNCTION_CALLING_UI_TIMEOUT", 5000)
+
+# Native mode retry attempts before fallback
+FUNCTION_CALLING_NATIVE_RETRY_COUNT = get_int_env(
+    "FUNCTION_CALLING_NATIVE_RETRY_COUNT", 2
+)
+
+# Clear function definitions between requests (stateless behavior)
+FUNCTION_CALLING_CLEAR_BETWEEN_REQUESTS = get_boolean_env(
+    "FUNCTION_CALLING_CLEAR_BETWEEN_REQUESTS", True
+)
+
+# Enable detailed function calling debug logs
+FUNCTION_CALLING_DEBUG = get_boolean_env("FUNCTION_CALLING_DEBUG", False)
+
+# --- Function Calling Cache Configuration ---
+# Enable caching of function calling toggle state and tool declarations
+# Skips redundant UI operations when same tools are used in subsequent requests
+FUNCTION_CALLING_CACHE_ENABLED = get_boolean_env("FUNCTION_CALLING_CACHE_ENABLED", True)
+
+# Cache TTL in seconds (0 = no expiration within session)
+# Cache is automatically invalidated on model switch or new chat
+FUNCTION_CALLING_CACHE_TTL = get_int_env("FUNCTION_CALLING_CACHE_TTL", 0)
+
+# --- New Function Calling Configuration (FC Improvements) ---
+# Add thoughtSignature to functionCall parts for Gemini 3 compatibility
+# Reference: ADR-002-thoughtSignature-support.md
+FUNCTION_CALLING_THOUGHT_SIGNATURE = get_boolean_env(
+    "FUNCTION_CALLING_THOUGHT_SIGNATURE", True
+)
+
+# Convert JSON Schema types to UPPERCASE (e.g., "string" -> "STRING")
+# Default is false for backwards compatibility - enable only after UI verification
+# Reference: ADR-005-type-case-normalization.md
+FUNCTION_CALLING_UPPERCASE_TYPES = get_boolean_env(
+    "FUNCTION_CALLING_UPPERCASE_TYPES", False
+)
+
+# --- Cookie Refresh Configuration ---
+# Enable automatic cookie refresh to keep auth profiles fresh
+COOKIE_REFRESH_ENABLED = get_boolean_env("COOKIE_REFRESH_ENABLED", True)
+
+# Periodic refresh interval in seconds (default: 30 minutes)
+COOKIE_REFRESH_INTERVAL_SECONDS = get_int_env("COOKIE_REFRESH_INTERVAL_SECONDS", 1800)
+
+# Enable cookie save on successful API requests (saves after every N requests)
+COOKIE_REFRESH_ON_REQUEST_ENABLED = get_boolean_env(
+    "COOKIE_REFRESH_ON_REQUEST_ENABLED", True
+)
+COOKIE_REFRESH_REQUEST_INTERVAL = get_int_env("COOKIE_REFRESH_REQUEST_INTERVAL", 10)
+
+# Enable cookie save on graceful shutdown
+COOKIE_REFRESH_ON_SHUTDOWN = get_boolean_env("COOKIE_REFRESH_ON_SHUTDOWN", True)

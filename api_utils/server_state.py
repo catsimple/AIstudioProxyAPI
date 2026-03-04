@@ -16,7 +16,7 @@ import asyncio
 import logging
 import multiprocessing
 from asyncio import Event, Lock, Queue, Task
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 if TYPE_CHECKING:
     from playwright.async_api import (
@@ -66,10 +66,10 @@ class ServerState:
         # --- Model State ---
         self.global_model_list_raw_json: Optional[str] = None
         self.parsed_model_list: List[Dict[str, Any]] = []
-        self.last_model_count: int = 0
         self.model_list_fetch_event: Event = asyncio.Event()
         self.current_ai_studio_model_id: Optional[str] = None
-        self.model_switching_lock: Optional[Lock] = None
+        self.current_auth_profile_path: Optional[str] = None
+        self.model_switching_lock: Lock = Lock()
         self.excluded_model_ids: Set[str] = set()
 
         # --- Request Processing State ---
@@ -79,7 +79,7 @@ class ServerState:
 
         # --- Parameter Cache ---
         self.page_params_cache: Dict[str, Any] = {}
-        self.params_cache_lock: Optional[Lock] = None
+        self.params_cache_lock: Lock = Lock()
 
         # --- Debug Logging State ---
         self.console_logs: List[Dict[str, Any]] = []
@@ -94,6 +94,7 @@ class ServerState:
 
         # --- Control Flags ---
         self.should_exit: bool = False
+        self.quota_watchdog: Optional[Callable] = None
 
     def clear_debug_logs(self) -> None:
         """Clear console and network logs (called after each request)."""

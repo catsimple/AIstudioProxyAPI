@@ -24,7 +24,7 @@ import {
   ChevronDown,
   AlertCircle
 } from 'lucide-react';
-import { useChat } from '@/contexts';
+import { useChat, useI18n } from '@/contexts';
 import type { ChatMessage } from '@/types';
 import styles from './ChatPanel.module.css';
 
@@ -34,38 +34,41 @@ import styles from './ChatPanel.module.css';
  * Returns: { liveMs, finalMs, displayMs } where displayMs shows live during active, final after.
  */
 function useElapsedTimer(isActive: boolean): { liveMs: number; finalMs: number; displayMs: number } {
+  const startTimeRef = useRef<number | null>(null);
   const [liveMs, setLiveMs] = useState(0);
   const [finalMs, setFinalMs] = useState(0);
-  const [startTime, setStartTime] = useState<number | null>(null);
+  const wasActiveRef = useRef(false);
 
-  // Handle activation - start timer
+  // Handle activation/deactivation
   useEffect(() => {
-    if (isActive) {
-      setStartTime(Date.now());
+    if (isActive && !wasActiveRef.current) {
+      // Just became active - start timer
+      startTimeRef.current = Date.now();
       setLiveMs(0);
+    } else if (!isActive && wasActiveRef.current) {
+      // Just became inactive - capture final time
+      if (startTimeRef.current !== null) {
+        const elapsed = Date.now() - startTimeRef.current;
+        setFinalMs(elapsed);
+        setLiveMs(elapsed);
+        startTimeRef.current = null;
+      }
     }
+    wasActiveRef.current = isActive;
   }, [isActive]);
-
-  // Handle deactivation - capture final time
-  useEffect(() => {
-    if (!isActive && startTime !== null) {
-      const elapsed = Date.now() - startTime;
-      setFinalMs(elapsed);
-      setLiveMs(elapsed);
-      setStartTime(null);
-    }
-  }, [isActive, startTime]);
 
   // Tick interval while active
   useEffect(() => {
-    if (!isActive || startTime === null) return;
-
+    if (!isActive || startTimeRef.current === null) return;
+    
     const interval = setInterval(() => {
-      setLiveMs(Date.now() - startTime);
-    }, 100);
-
+      if (startTimeRef.current !== null) {
+        setLiveMs(Date.now() - startTimeRef.current);
+      }
+    }, 100); // Update every 100ms for smooth display
+    
     return () => clearInterval(interval);
-  }, [isActive, startTime]);
+  }, [isActive]);
 
   // displayMs: live while active, final after
   const displayMs = isActive ? liveMs : finalMs;
@@ -74,6 +77,7 @@ function useElapsedTimer(isActive: boolean): { liveMs: number; finalMs: number; 
 }
 
 export function ChatPanel() {
+  const { t } = useI18n();
   const { 
     messages, 
     isStreaming, 
@@ -123,9 +127,9 @@ export function ChatPanel() {
         {messages.length === 0 ? (
           <div className={styles.emptyState}>
             <MessageSquare className={styles.emptyIcon} />
-            <h2 className={styles.emptyTitle}>开始对话</h2>
+            <h2 className={styles.emptyTitle}>{t.chat.startConversation}</h2>
             <p className={styles.emptyDescription}>
-              在下方输入消息，开始与 AI 助手对话
+              {t.chat.startDescription}
             </p>
           </div>
         ) : (
@@ -153,7 +157,7 @@ export function ChatPanel() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入消息... (Shift+Enter 换行)"
+            placeholder={t.chat.placeholder}
             rows={1}
             disabled={isStreaming}
           />
@@ -162,7 +166,7 @@ export function ChatPanel() {
               <button
                 className={styles.clearButton}
                 onClick={clearMessages}
-                title="清空对话"
+                title={t.chat.clearChat}
                 disabled={isStreaming}
               >
                 <Trash2 size={20} />
@@ -172,7 +176,7 @@ export function ChatPanel() {
               <button
                 className={`${styles.sendButton} ${styles.stopButton}`}
                 onClick={stopGeneration}
-                title="停止生成"
+                title={t.chat.stopGenerating}
               >
                 <Square size={20} />
               </button>
@@ -181,7 +185,7 @@ export function ChatPanel() {
                 className={styles.sendButton}
                 onClick={handleSend}
                 disabled={!input.trim()}
-                title="发送消息"
+                title={t.chat.sendMessage}
               >
                 <Send size={20} />
               </button>
@@ -209,6 +213,7 @@ function Message({
   onRegenerate: () => void;
   disabled: boolean;
 }) {
+  const { t } = useI18n();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   // Capture both dimensions to match edit area to original message box
@@ -221,27 +226,25 @@ function Message({
   // Thinking section state - auto-expand while thinking, auto-collapse when done
   const hasThinking = Boolean(message.thinkingContent);
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(message.isThinking ?? false);
-
+  
   // Timer hooks - track total streaming duration and thinking duration
+  // The hook now returns displayMs which shows live during active, final after
   const isCurrentlyStreaming = message.isStreaming === true;
   const streamingTimer = useElapsedTimer(isCurrentlyStreaming);
-
+  
   const isActivelyThinking = message.isThinking === true;
   const thinkingTimer = useElapsedTimer(isActivelyThinking);
-
+  
   // Convert to seconds for display (minimum 1s if any time recorded)
   const totalSeconds = streamingTimer.displayMs > 0 ? Math.max(1, Math.floor(streamingTimer.displayMs / 1000)) : 0;
   const thinkingSeconds = thinkingTimer.displayMs > 0 ? Math.max(1, Math.floor(thinkingTimer.displayMs / 1000)) : 0;
-
-  // Auto-expand when thinking starts, auto-collapse when done
+  
+  // Auto-collapse thinking when thinking phase ends
   useEffect(() => {
     if (message.isThinking) {
       setIsThinkingExpanded(true);
-    }
-  }, [message.isThinking]);
-
-  useEffect(() => {
-    if (!message.isThinking && !message.isStreaming && hasThinking) {
+    } else if (hasThinking && !message.isStreaming) {
+      // Thinking done and streaming finished - collapse
       setIsThinkingExpanded(false);
     }
   }, [message.isThinking, message.isStreaming, hasThinking]);
@@ -310,7 +313,7 @@ function Message({
                 ) : (
                   <Brain size={14} className={message.isThinking ? styles.spinningIcon : ''} />
                 )}
-                <span>{message.error ? '思考中断' : message.isThinking ? '正在思考' : '思考过程'}</span>
+                <span>{message.error ? t.chat.thinkingInterrupted : message.isThinking ? t.chat.thinking : t.chat.thinkingProcess}</span>
               </div>
               <div className={styles.thinkingHeaderRight}>
                 {!message.error && (
@@ -349,16 +352,16 @@ function Message({
                 <button 
                   className={styles.editActionButton}
                   onClick={handleSaveEdit}
-                  title="保存"
+                  title={t.common.save}
                 >
-                  <Check size={14} /> 保存
+                  <Check size={14} /> {t.common.save}
                 </button>
                 <button 
                   className={`${styles.editActionButton} ${styles.cancel}`}
                   onClick={handleCancelEdit}
-                  title="取消"
+                  title={t.common.cancel}
                 >
-                  <X size={14} /> 取消
+                  <X size={14} /> {t.common.cancel}
                 </button>
               </div>
             </div>
@@ -415,7 +418,7 @@ function Message({
         {/* Total time badge - always visible for AI messages with time */}
         {!isUser && !message.isStreaming && totalSeconds > 0 && (
           <div className={styles.totalTimeBadge}>
-            <span>总耗时 {formatTime(totalSeconds)}</span>
+            <span>{t.chat.totalTime} {formatTime(totalSeconds)}</span>
           </div>
         )}
 
@@ -426,7 +429,7 @@ function Message({
               className={styles.actionButton}
               onClick={startEditing}
               disabled={disabled}
-              title="编辑消息"
+              title={t.chat.editMessage}
             >
               <Pencil size={14} />
             </button>
@@ -434,7 +437,7 @@ function Message({
               className={styles.actionButton}
               onClick={onRegenerate}
               disabled={disabled}
-              title={isUser ? "重新发送" : "重新生成"}
+              title={isUser ? t.chat.resend : t.chat.regenerate}
             >
               <RefreshCw size={14} />
             </button>

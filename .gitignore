@@ -50,10 +50,6 @@ web_modules/
 # TypeScript cache
 *.tsbuildinfo
 
-# Python type-check/lint caches
-.mypy_cache/
-.ruff_cache/
-
 # Optional npm cache directory
 .npm
 
@@ -79,7 +75,6 @@ web_modules/
 .yarn-integrity
 
 # dotenv environment variables file
-.env
 .env.development.local
 .env.test.local
 .env.production.local
@@ -195,7 +190,6 @@ coverage.xml
 .testmondata*
 
 # Environments
-.env
 .venv
 env/
 venv/
@@ -232,12 +226,19 @@ venv.bak/
 errors_py/*/
 !errors_py/.gitkeep
 logs/
+errors_py
 
 # Authentication Profiles (Sensitive)
 auth_profiles/active/*
 !auth_profiles/active/.gitkeep
 auth_profiles/saved/*
 !auth_profiles/saved/.gitkeep
+auth_profiles/emergency/*
+!auth_profiles/emergency/.gitkeep
+config/profile_usage.json
+config/cooldown_status.json
+auth_profiles/locked
+auth_profilesBackup
 
 # Camoufox/Playwright Profile Data (Assume these are generated/temporary)
 camoufox_profile/
@@ -249,13 +250,12 @@ deprecated_javascript_version/node_modules/
 .roomodes
 memory-bank/
 gui_config.json
+.rooignore
+.kiloignore
+.kilocodeignore
 
 # key
 key.txt
-
-# Private key material
-*.pem
-*.key
 
 # 脚本注入相关文件
 # 用户自定义的模型配置文件（保留示例文件）
@@ -272,6 +272,13 @@ docker/my_*.json
 
 monkeytype.sqlite3
 
+# Pyright output
+baseline_pyright.txt
+pyright_*.txt
+
+# Ruff cache (explicit)
+.ruff_cache/
+
 # Temporary debug/output files
 pyright_output.txt
 pyright_utils_full.txt
@@ -282,3 +289,6 @@ utils_errors.txt
 static/frontend/node_modules/
 static/frontend/coverage/
 static/frontend/dist/
+
+# GUI Launcher user config (contains user-specific settings)
+gui/user_config.json

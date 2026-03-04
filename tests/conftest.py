@@ -26,6 +26,27 @@ def global_mock_error_snapshots():
 
 
 @pytest.fixture(autouse=True)
+def reset_global_state():
+    """Reset GlobalState and ServerState before each test to ensure isolation."""
+    from api_utils.server_state import state
+    from config.global_state import GlobalState
+
+    GlobalState.reset_quota_status()
+    GlobalState.IS_RECOVERING = False
+    GlobalState.DEPLOYMENT_EMERGENCY_MODE = False
+    GlobalState.CURRENT_STREAM_REQ_ID = None
+    GlobalState.queued_request_count = 0
+    GlobalState.AUTH_ROTATION_LOCK.set()  # Allow requests by default
+    GlobalState.QUOTA_EXCEEDED_EVENT.clear()
+    GlobalState.rotation_complete_event.clear()
+    GlobalState.RECOVERY_EVENT.set()
+    GlobalState.IS_SHUTTING_DOWN.clear()
+
+    state.reset()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def mock_server_module():
     """Mock the server module to prevent import errors and provide global state."""
     module_name = "server"
@@ -132,6 +153,11 @@ def mock_page():
     page.locator = MagicMock(return_value=default_locator)
     # page.get_by_role() is also SYNC
     page.get_by_role = MagicMock(return_value=default_locator)
+    # page.is_closed() is SYNC in Playwright
+    page.is_closed = MagicMock(return_value=False)
+    # page.on() and page.remove_listener() are SYNC
+    page.on = MagicMock()
+    page.remove_listener = MagicMock()
 
     return page
 
@@ -365,3 +391,15 @@ def real_locks_mock_browser():
             break
 
     state.reset()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """
+    Clean up any remaining multiprocessing children to prevent hangs.
+    This is especially important in CI environments.
+    """
+    import multiprocessing
+
+    for child in multiprocessing.active_children():
+        child.terminate()
+        child.join(timeout=1.0)

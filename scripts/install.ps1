@@ -219,9 +219,9 @@ function Show-NextSteps {
     Write-Host "5. 日常运行: poetry run python launch_camoufox.py --headless"
     Write-Host ""
     Write-Host "详细文档："
-    Write-Host "- 环境配置: docs/environment-configuration.md"
-    Write-Host "- 认证设置: docs/authentication-setup.md"
-    Write-Host "- 日常使用: docs/daily-usage.md"
+    Write-Host "- 快速开始: docs/quick-start.md"
+    Write-Host "- 配置参考: docs/configuration-reference.md"
+    Write-Host "- 认证与轮转: docs/auth-rotation-cookie-refresh.md"
     Write-Host ""
 }
 

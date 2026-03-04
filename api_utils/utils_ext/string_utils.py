@@ -5,10 +5,10 @@ from models import Message
 
 
 def extract_json_from_text(text: str) -> Optional[str]:
-    """尝试从纯文本中提取首个 JSON 对象字符串。"""
+    """Attempt to extract the first JSON object string from plain text."""
     if not text:
         return None
-    # 简单启发式：找到第一个 '{' 与最后一个匹配的 '}'
+    # Simple heuristic: find the first '{' and the last matching '}'
     try:
         start = text.find("{")
         end = text.rfind("}")
@@ -22,7 +22,7 @@ def extract_json_from_text(text: str) -> Optional[str]:
 
 
 def get_latest_user_text(messages: List[Message]) -> str:
-    """提取最近一条用户消息的文本内容（拼接多段 text）。"""
+    """Extract the text content of the most recent user message (concatenating multiple text segments)."""
     for msg in reversed(messages):
         if msg.role == "user":
             content = msg.content

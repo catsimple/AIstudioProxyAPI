@@ -14,6 +14,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ..app import VERSION
+
 logger = logging.getLogger("CamoufoxLauncher")
 
 router = APIRouter(prefix="/api/server", tags=["server"])
@@ -24,8 +26,9 @@ _SERVER_START_TIME: Optional[float] = None
 
 def _init_start_time() -> None:
     """Initialize server start time (called once at startup)."""
+    global _SERVER_START_TIME
     if _SERVER_START_TIME is None:
-        globals()["_SERVER_START_TIME"] = time.time()
+        _SERVER_START_TIME = time.time()
 
 
 _init_start_time()
@@ -59,21 +62,21 @@ def _format_uptime(seconds: float) -> str:
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
 
-    parts: list[str] = []
+    parts = []
     if days > 0:
-        parts.append(f"{days}天")
+        parts.append(f"{days}d")
     if hours > 0:
-        parts.append(f"{hours}小时")
+        parts.append(f"{hours}h")
     if minutes > 0:
-        parts.append(f"{minutes}分钟")
-    parts.append(f"{secs}秒")
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
 
     return " ".join(parts)
 
 
 @router.get("/status")
 async def get_server_status() -> JSONResponse:
-    """获取服务器状态信息。"""
+    """Get server status information."""
     import sys
 
     uptime = time.time() - (_SERVER_START_TIME or time.time())
@@ -88,7 +91,7 @@ async def get_server_status() -> JSONResponse:
             os.environ.get("SERVER_PORT_INFO", os.environ.get("PORT", 2048))
         ),
         stream_port=int(os.environ.get("STREAM_PORT", 3120)),
-        version="1.0.0",  # Could read from package
+        version=VERSION,
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         started_at=started_at.isoformat(),
     )
@@ -99,15 +102,15 @@ async def get_server_status() -> JSONResponse:
 @router.post("/restart")
 async def restart_server(request: RestartRequest) -> JSONResponse:
     """
-    请求服务器重启。
+    Request server restart.
 
-    注意：这个操作会终止当前进程，需要外部进程管理器重新启动。
+    Note: This operation terminates the current process and requires an external process manager to restart.
     """
     if not request.confirm:
         return JSONResponse(
             content={
                 "success": False,
-                "message": "重启操作需要确认。请设置 confirm=true",
+                "message": "Restart operation requires confirmation. Please set confirm=true",
             },
             status_code=400,
         )
@@ -117,12 +120,12 @@ async def restart_server(request: RestartRequest) -> JSONResponse:
         return JSONResponse(
             content={
                 "success": False,
-                "message": f"无效的启动模式。有效选项: {valid_modes}",
+                "message": f"Invalid launch mode. Valid options: {valid_modes}",
             },
             status_code=400,
         )
 
-    logger.info(f"[Server] 收到重启请求，目标模式: {request.mode}")
+    logger.info(f"[Server] Received restart request, target mode: {request.mode}")
 
     # Set environment variable for next launch
     os.environ["REQUESTED_RESTART_MODE"] = request.mode
@@ -131,7 +134,7 @@ async def restart_server(request: RestartRequest) -> JSONResponse:
     return JSONResponse(
         content={
             "success": True,
-            "message": f"服务器将以 {request.mode} 模式重启。请刷新页面。",
+            "message": f"Server will restart in {request.mode} mode. Please refresh the page.",
             "mode": request.mode,
         }
     )

@@ -161,9 +161,9 @@ show_next_steps() {
     echo "5. 日常运行: python launch_camoufox.py --headless"
     echo
     echo "详细文档："
-    echo "- 环境配置: docs/environment-configuration.md"
-    echo "- 认证设置: docs/authentication-setup.md"
-    echo "- 日常使用: docs/daily-usage.md"
+    echo "- 快速开始: docs/quick-start.md"
+    echo "- 配置参考: docs/configuration-reference.md"
+    echo "- 认证与轮转: docs/auth-rotation-cookie-refresh.md"
     echo
 }
 

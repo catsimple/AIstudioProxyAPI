@@ -1,11 +1,10 @@
 import asyncio
-from typing import List, cast
+from typing import Callable, List
 
-from playwright.async_api import Locator
 from playwright.async_api import TimeoutError
 from playwright.async_api import expect as expect_async
 
-from browser_utils.operations_modules.errors import save_error_snapshot
+from browser_utils.operations import save_error_snapshot
 from config import (
     CDK_OVERLAY_CONTAINER_SELECTOR,
     PROMPT_TEXTAREA_SELECTOR,
@@ -20,32 +19,29 @@ from config.selector_utils import (
 from logging_utils import set_request_id
 from models import ClientDisconnectedError
 
-from .base import BaseController, DisconnectCheck
+from .base import BaseController
 
 
 class InputController(BaseController):
     """Handles prompt input and submission."""
 
     async def submit_prompt(
-        self,
-        prompt: str,
-        image_list: List[str],
-        check_client_disconnected: DisconnectCheck,
-    ) -> None:
-        """提交提示到页面。"""
+        self, prompt: str, image_list: List, check_client_disconnected: Callable
+    ):
+        """Submit prompt to the page."""
         set_request_id(self.req_id)
-        self.logger.debug(f"[Input] 填充提示词 ({len(prompt)} chars)")
+        self.logger.debug(f"[Input] Filling prompt ({len(prompt)} chars)")
         prompt_textarea_locator = self.page.locator(PROMPT_TEXTAREA_SELECTOR)
-        # 使用集中管理的选择器，支持新旧 UI 结构
+        # Use centralized selectors supporting new and old UI structures
         autosize_wrapper_locator = self.page.locator(
             build_combined_selector(
                 AUTOSIZE_WRAPPER_SELECTORS[:2]
-            )  # .text-wrapper 元素
+            )  # .text-wrapper element
         )
         legacy_autosize_wrapper = self.page.locator(
             build_combined_selector(
                 AUTOSIZE_WRAPPER_SELECTORS[2:]
-            )  # ms-autosize-textarea 元素
+            )  # ms-autosize-textarea element
         )
         submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
 
@@ -55,7 +51,7 @@ class InputController(BaseController):
                 check_client_disconnected, "After Input Visible"
             )
 
-            # 使用 JavaScript 填充文本
+            # Fill text using JavaScript
             await prompt_textarea_locator.evaluate(
                 """
                 (element, text) => {
@@ -85,15 +81,17 @@ class InputController(BaseController):
             if len(image_list) > 0:
                 ok = await self._open_upload_menu_and_choose_file(image_list)
                 if not ok:
-                    self.logger.error("在上传文件时发生错误: 通过菜单方式未能设置文件")
+                    self.logger.error(
+                        "Error during file upload: Failed to set files via menu method"
+                    )
 
-            # 等待发送按钮启用 (使用可配置的快速失败超时)
+            # Wait for submit button to be enabled (using configurable fast-fail timeout)
             from config.timeouts import SUBMIT_BUTTON_ENABLE_TIMEOUT_MS
 
             wait_timeout_ms_submit_enabled = SUBMIT_BUTTON_ENABLE_TIMEOUT_MS
             start_time = asyncio.get_event_loop().time()
             self.logger.debug(
-                f"[Input] 等待发送按钮 (max {wait_timeout_ms_submit_enabled}ms)"
+                f"[Input] Waiting for submit button (max {wait_timeout_ms_submit_enabled}ms)"
             )
 
             try:
@@ -103,12 +101,12 @@ class InputController(BaseController):
                     )
 
                     try:
-                        # 使用短超时轮询检查，以便能响应中断信号
+                        # Use short timeout polling to respond to interruption signals
                         if await submit_button_locator.is_enabled(timeout=500):
-                            self.logger.debug("[Input] 发送按钮已启用")
+                            self.logger.debug("[Input] Submit button enabled")
                             break
                     except Exception:
-                        # 忽略临时错误（如元素尚未出现）
+                        # Ignore temporary errors (e.g. element not present yet)
                         pass
 
                     if (
@@ -121,7 +119,9 @@ class InputController(BaseController):
                     await asyncio.sleep(0.5)
 
             except Exception as e_pw_enabled:
-                self.logger.error(f"等待发送按钮启用超时或错误: {e_pw_enabled}")
+                self.logger.error(
+                    f"Timeout or error waiting for submit button enabled: {e_pw_enabled}"
+                )
                 await save_error_snapshot(f"submit_button_enable_timeout_{self.req_id}")
                 raise
 
@@ -130,46 +130,52 @@ class InputController(BaseController):
             )
             await asyncio.sleep(0.3)
 
-            # 优先点击按钮提交，其次回车提交，最后组合键提交
+            # Try clicking button first, then Enter, then Combo keys
             button_clicked = False
             try:
-                self.logger.debug("[Input] 尝试点击提交按钮...")
-                # 提交前再处理一次潜在对话框，避免按钮点击被拦截
+                self.logger.debug("[Input] Attempting to click submit button...")
+                # Handle potential dialogs before submit
                 await self._handle_post_upload_dialog()
-                # 先尝试关闭任何 tooltip 遮罩 (直接从 DOM 移除)
+                # Try to clear tooltip overlays
                 await self._dismiss_tooltip_overlays()
                 try:
                     await submit_button_locator.click(timeout=5000)
                 except Exception:
-                    # 如果普通点击失败（可能被 tooltip 遮挡），使用 JavaScript 直接点击
-                    self.logger.debug("[Input] 普通点击失败，尝试 JavaScript 点击...")
+                    # If normal click fails (possibly blocked by tooltip), use JavaScript click
+                    self.logger.debug(
+                        "[Input] Normal click failed, attempting JavaScript click..."
+                    )
                     js_clicked = await self._js_click_submit_button(
                         submit_button_locator
                     )
                     if not js_clicked:
-                        # 最后尝试 force 点击
+                        # Finally try force click
                         self.logger.debug(
-                            "[Input] JavaScript 点击失败，尝试 force 点击..."
+                            "[Input] JavaScript click failed, attempting force click..."
                         )
                         await submit_button_locator.click(timeout=5000, force=True)
-                self.logger.debug("[Input] 提交按钮点击完成")
+                self.logger.debug("[Input] Submit button click complete")
                 button_clicked = True
             except Exception as click_err:
-                self.logger.error(f"提交按钮点击失败: {click_err}")
+                self.logger.error(f"Submit button click failed: {click_err}")
                 await save_error_snapshot(f"submit_button_click_fail_{self.req_id}")
 
             if not button_clicked:
-                self.logger.info("按钮提交失败，尝试回车键提交...")
+                self.logger.info(
+                    "Button submit failed, attempting Enter key submission..."
+                )
                 submitted_successfully = await self._try_enter_submit(
                     prompt_textarea_locator, check_client_disconnected
                 )
                 if not submitted_successfully:
-                    self.logger.info("回车提交失败，尝试组合键提交...")
+                    self.logger.info(
+                        "Enter submission failed, attempting combo key submission..."
+                    )
                     combo_ok = await self._try_combo_submit(
                         prompt_textarea_locator, check_client_disconnected
                     )
                     if not combo_ok:
-                        self.logger.error("组合键提交也失败。")
+                        self.logger.error("Combo key submission also failed.")
                         raise Exception(
                             "Submit failed: Button, Enter, and Combo key all failed"
                         )
@@ -179,15 +185,17 @@ class InputController(BaseController):
         except Exception as e_input_submit:
             if isinstance(e_input_submit, asyncio.CancelledError):
                 raise
-            self.logger.error(f"输入和提交过程中发生错误: {e_input_submit}")
+            self.logger.error(
+                f"Error during input and submit process: {e_input_submit}"
+            )
             if not isinstance(e_input_submit, ClientDisconnectedError):
                 await save_error_snapshot(f"input_submit_error_{self.req_id}")
             raise
 
     async def _open_upload_menu_and_choose_file(self, files_list: List[str]) -> bool:
-        """通过'Insert assets'菜单选择'上传/Upload'项并打开文件选择器设置文件。"""
+        """Select 'Upload' from the 'Insert assets' menu and set files."""
         try:
-            # 若上一次菜单/对话的透明遮罩仍在，先尝试关闭
+            # If a transparent overlay from a previous menu/dialog exists, try to close it
             try:
                 tb = self.page.locator(
                     "div.cdk-overlay-backdrop.cdk-overlay-transparent-backdrop.cdk-overlay-backdrop-showing"
@@ -202,70 +210,70 @@ class InputController(BaseController):
             await expect_async(trigger).to_be_visible(timeout=3000)
             await trigger.click()
             menu_container = self.page.locator(CDK_OVERLAY_CONTAINER_SELECTOR)
-            # 等待菜单显示
+            # Wait for menu to show
             try:
                 await expect_async(
                     menu_container.locator("div[role='menu']").first
                 ).to_be_visible(timeout=3000)
             except Exception:
-                # 再尝试一次触发
+                # Try clicking again
                 try:
                     await trigger.click()
                     await expect_async(
                         menu_container.locator("div[role='menu']").first
                     ).to_be_visible(timeout=3000)
                 except Exception:
-                    self.logger.warning("未能显示上传菜单面板。")
+                    self.logger.warning("Failed to show upload menu panel.")
                     return False
 
-            # 使用 aria-label 或文本匹配 'Upload a file' / 'Upload File' 的菜单项
+            # Use menu item with aria-label or text match
             try:
-                # 优先匹配新 UI: "Upload a file"
+                # Prefer new UI match
                 upload_btn = menu_container.locator(
                     "div[role='menu'] button[role='menuitem'][aria-label='Upload a file']"
                 )
                 if await upload_btn.count() == 0:
-                    # 回退到旧 UI: "Upload File"
+                    # Fallback to old UI match
                     upload_btn = menu_container.locator(
                         "div[role='menu'] button[role='menuitem'][aria-label='Upload File']"
                     )
                 if await upload_btn.count() == 0:
-                    # 退化到按文本匹配 (新 UI)
+                    # Fallback to text match (new UI)
                     upload_btn = menu_container.locator(
                         "div[role='menu'] button[role='menuitem']:has-text('Upload a file')"
                     )
                 if await upload_btn.count() == 0:
-                    # 退化到按文本匹配 (旧 UI)
+                    # Fallback to text match (old UI)
                     upload_btn = menu_container.locator(
                         "div[role='menu'] button[role='menuitem']:has-text('Upload File')"
                     )
                 if await upload_btn.count() == 0:
                     self.logger.warning(
-                        "未找到 'Upload a file' 或 'Upload File' 菜单项。"
+                        "Could not find 'Upload a file' or 'Upload File' menu item."
                     )
                     return False
                 btn = upload_btn.first
                 await expect_async(btn).to_be_visible(timeout=2000)
-                # 优先使用内部隐藏 input[type=file]
+                # Prefer internal hidden input[type=file]
                 input_loc = btn.locator('input[type="file"]')
                 if await input_loc.count() > 0:
                     await input_loc.set_input_files(files_list)
                     self.logger.info(
-                        f"通过菜单项(Upload a file) 隐藏 input 设置文件成功: {len(files_list)} 个"
+                        f"Files successfully set via hidden input in menu item (Upload): {len(files_list)} files"
                     )
                 else:
-                    # 回退为原生文件选择器
+                    # Fallback to native file chooser
                     async with self.page.expect_file_chooser() as fc_info:
                         await btn.click()
                     file_chooser = await fc_info.value
                     await file_chooser.set_files(files_list)
                     self.logger.info(
-                        f"通过文件选择器设置文件成功: {len(files_list)} 个"
+                        f"Files successfully set via native file chooser: {len(files_list)} files"
                     )
             except Exception as e_set:
-                self.logger.error(f"设置文件失败: {e_set}")
+                self.logger.error(f"Failed to set files: {e_set}")
                 return False
-            # 关闭可能残留的菜单遮罩
+            # Close leftover menu overlay
             try:
                 backdrop = self.page.locator(
                     "div.cdk-overlay-backdrop.cdk-overlay-backdrop-showing, div.cdk-overlay-backdrop.cdk-overlay-transparent-backdrop.cdk-overlay-backdrop-showing"
@@ -275,35 +283,33 @@ class InputController(BaseController):
                     await asyncio.sleep(0.2)
             except Exception:
                 pass
-            # 处理可能的授权弹窗
+            # Handle potential authorization popups
             await self._handle_post_upload_dialog()
             return True
         except Exception as e:
             if isinstance(e, asyncio.CancelledError):
                 raise
-            self.logger.error(f"通过上传菜单设置文件失败: {e}")
+            self.logger.error(f"Failed to set files via upload menu: {e}")
             return False
 
-    async def _handle_post_upload_dialog(self) -> None:
-        """处理上传后可能出现的授权/版权确认对话框，优先点击同意类按钮，不主动关闭重要对话框。"""
+    async def _handle_post_upload_dialog(self):
+        """Handle authorization/copyright confirmation dialogs that may appear after upload."""
         try:
             overlay_container = self.page.locator(CDK_OVERLAY_CONTAINER_SELECTOR)
             if await overlay_container.count() == 0:
                 return
 
-            # 候选同意按钮的文本/属性
+            # Candidate agreement button texts
             agree_texts = [
                 "Agree",
                 "I agree",
                 "Allow",
                 "Continue",
                 "OK",
-                "确定",
-                "同意",
-                "继续",
-                "允许",
+                "Confirm",
+                "Yes",
             ]
-            # 统一在 overlay 容器内查找可见按钮
+            # Search for visible buttons within the overlay container
             for text in agree_texts:
                 try:
                     btn = overlay_container.locator(f"button:has-text('{text}')")
@@ -311,12 +317,14 @@ class InputController(BaseController):
                         timeout=300
                     ):
                         await btn.first.click()
-                        self.logger.info(f"上传后对话框: 点击按钮 '{text}'。")
+                        self.logger.info(
+                            f"Post-upload dialog: Clicked button '{text}'."
+                        )
                         await asyncio.sleep(0.3)
                         break
                 except Exception:
                     continue
-            # 若存在带 aria-label 的版权按钮
+            # If copyright acknowledgment button exists (via aria-label)
             try:
                 acknow_btn_locator = self.page.locator(
                     'button[aria-label*="copyright" i], button[aria-label*="acknowledge" i]'
@@ -327,13 +335,13 @@ class InputController(BaseController):
                 ):
                     await acknow_btn_locator.first.click()
                     self.logger.info(
-                        "上传后对话框: 点击版权确认按钮 (aria-label 匹配)。"
+                        "Post-upload dialog: Clicked copyright acknowledgment button (aria-label match)."
                     )
                     await asyncio.sleep(0.3)
             except Exception:
                 pass
 
-            # 等待遮罩层消失（尽量不强制 ESC，避免意外取消）
+            # Wait for overlay to disappear
             try:
                 overlay_backdrop = self.page.locator(
                     "div.cdk-overlay-backdrop.cdk-overlay-backdrop-showing"
@@ -341,10 +349,10 @@ class InputController(BaseController):
                 if await overlay_backdrop.count() > 0:
                     try:
                         await expect_async(overlay_backdrop).to_be_hidden(timeout=3000)
-                        self.logger.info("上传后对话框遮罩层已隐藏。")
+                        self.logger.info("Post-upload dialog overlay hidden.")
                     except Exception:
                         self.logger.warning(
-                            "上传后对话框遮罩层仍存在，后续提交可能被拦截。"
+                            "Post-upload dialog overlay still exists, subsequent submit might be blocked."
                         )
             except Exception:
                 pass
@@ -353,17 +361,15 @@ class InputController(BaseController):
         except Exception:
             pass
 
-    async def _dismiss_tooltip_overlays(self) -> None:
-        """关闭可能阻挡点击的 tooltip 弹出层 - 直接从 DOM 移除。"""
+    async def _dismiss_tooltip_overlays(self):
+        """Close tooltip overlays that may block clicks - directly remove from DOM."""
         try:
-            # 首先尝试移动鼠标让 tooltip 自然消失
+            # Try to move mouse to make tooltips disappear naturally
             await self.page.mouse.move(0, 0)
             await asyncio.sleep(0.1)
 
-            # 然后用 JavaScript 强制删除所有可能阻挡的 tooltip/overlay 元素
-            removed_count = cast(
-                int,
-                await self.page.evaluate("""
+            # Use JavaScript to force remove potential tooltip/overlay elements
+            removed_count = await self.page.evaluate("""
                 () => {
                     const selectors = [
                         '.mdc-tooltip',
@@ -384,65 +390,48 @@ class InputController(BaseController):
                     }
                     return count;
                 }
-            """),
-            )
+            """)
             if removed_count > 0:
-                self.logger.debug(f"[Input] 移除了 {removed_count} 个 tooltip 元素")
+                self.logger.debug(f"[Input] Removed {removed_count} tooltip elements")
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            self.logger.debug(f"[Input] tooltip 清理时发生异常: {e}")
+            self.logger.debug(f"[Input] Tooltip cleanup exception: {e}")
 
-    async def _js_click_submit_button(self, submit_button_locator: Locator) -> bool:
-        """使用 JavaScript 直接触发提交按钮点击事件。"""
+    async def _js_click_submit_button(self, submit_button_locator) -> bool:
+        """Use JavaScript to trigger the submit button click event directly."""
         try:
-            # 获取按钮元素并用 JS 点击
             await submit_button_locator.evaluate("el => el.click()")
-            self.logger.debug("[Input] JavaScript 点击提交按钮成功")
+            self.logger.debug("[Input] JavaScript click on submit button successful")
             return True
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            self.logger.debug(f"[Input] JavaScript 点击失败: {e}")
+            self.logger.debug(f"[Input] JavaScript click failed: {e}")
             return False
 
     async def _try_enter_submit(
-        self,
-        prompt_textarea_locator: Locator,
-        check_client_disconnected: DisconnectCheck,
+        self, prompt_textarea_locator, check_client_disconnected: Callable
     ) -> bool:
-        """优先使用回车键提交。"""
-        import os
+        """Submit using the Enter key."""
 
         try:
-            # 检测操作系统
-            host_os_from_launcher = os.environ.get("HOST_OS_FOR_SHORTCUT")
-
-            if host_os_from_launcher == "Darwin":
-                pass
-            elif host_os_from_launcher in ["Windows", "Linux"]:
-                pass
-            else:
-                # 浏览器环境，无需特殊OS检测
-                pass
-
             await prompt_textarea_locator.focus(timeout=5000)
             await self._check_disconnect(check_client_disconnected, "After Input Focus")
             await asyncio.sleep(0.1)
 
-            # 记录提交前的输入框内容，用于验证
+            # Record content before submit for verification
             original_content = ""
             try:
                 original_content = (
                     await prompt_textarea_locator.input_value(timeout=2000) or ""
                 )
             except Exception:
-                # 如果无法获取原始内容，仍然尝试提交
                 pass
 
-            # 尝试回车键提交
-            self.logger.info("尝试回车键提交")
+            # Try Enter key submission
+            self.logger.info("Attempting Enter key submission")
             try:
                 await self.page.keyboard.press("Enter")
             except asyncio.CancelledError:
@@ -456,18 +445,20 @@ class InputController(BaseController):
             await self._check_disconnect(check_client_disconnected, "After Enter Press")
             await asyncio.sleep(2.0)
 
-            # 验证提交是否成功
+            # Verify submission
             submission_success = False
             try:
-                # 方法1: 检查原始输入框是否清空
+                # Method 1: Check if input area is cleared
                 current_content = (
                     await prompt_textarea_locator.input_value(timeout=2000) or ""
                 )
                 if original_content and not current_content.strip():
-                    self.logger.info("验证方法1: 输入框已清空，回车键提交成功")
+                    self.logger.info(
+                        "Verification method 1: Input cleared, Enter key submission successful"
+                    )
                     submission_success = True
 
-                # 方法2: 检查提交按钮状态
+                # Method 2: Check submit button status
                 if not submission_success:
                     submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
                     try:
@@ -476,13 +467,13 @@ class InputController(BaseController):
                         )
                         if is_disabled:
                             self.logger.info(
-                                "验证方法2: 提交按钮已禁用，回车键提交成功"
+                                "Verification method 2: Submit button disabled, Enter key submission successful"
                             )
                             submission_success = True
                     except Exception:
                         pass
 
-                # 方法3: 检查是否有响应容器出现
+                # Method 3: Check for response container
                 if not submission_success:
                     try:
                         response_container = self.page.locator(
@@ -490,39 +481,37 @@ class InputController(BaseController):
                         )
                         container_count = await response_container.count()
                         if container_count > 0:
-                            # 检查最后一个容器是否是新的
                             last_container = response_container.last
                             is_vis = await last_container.is_visible(timeout=1000)
                             if is_vis:
                                 self.logger.info(
-                                    "验证方法3: 检测到响应容器，回车键提交成功"
+                                    "Verification method 3: Response container detected, Enter key submission successful"
                                 )
                                 submission_success = True
                     except Exception:
                         pass
             except Exception as verify_err:
-                self.logger.warning(f"回车键提交验证过程出错: {verify_err}")
-                # 出错时假定提交成功，让后续流程继续
+                self.logger.warning(
+                    f"Error during Enter key submission verification: {verify_err}"
+                )
                 submission_success = True
 
             if submission_success:
-                self.logger.info("回车键提交成功")
+                self.logger.info("Enter key submission successful")
                 return True
             else:
-                self.logger.warning("回车键提交验证失败")
+                self.logger.warning("Enter key submission verification failed")
                 return False
         except asyncio.CancelledError:
             raise
         except Exception as shortcut_err:
-            self.logger.warning(f"回车键提交失败: {shortcut_err}")
+            self.logger.warning(f"Enter key submission failed: {shortcut_err}")
             return False
 
     async def _try_combo_submit(
-        self,
-        prompt_textarea_locator: Locator,
-        check_client_disconnected: DisconnectCheck,
+        self, prompt_textarea_locator, check_client_disconnected: Callable
     ) -> bool:
-        """尝试使用组合键提交 (Meta/Control + Enter)。"""
+        """Attempt submission using combo keys (Meta/Control + Enter)."""
         import os
 
         try:
@@ -558,7 +547,7 @@ class InputController(BaseController):
             await self._check_disconnect(check_client_disconnected, "After Input Focus")
             await asyncio.sleep(0.1)
 
-            # 记录提交前的输入框内容，用于验证
+            # Record content before submit for verification
             original_content = ""
             try:
                 original_content = (
@@ -567,7 +556,9 @@ class InputController(BaseController):
             except Exception:
                 pass
 
-            self.logger.info(f"尝试组合键提交: {shortcut_modifier}+{shortcut_key}")
+            self.logger.info(
+                f"Attempting combo submission: {shortcut_modifier}+{shortcut_key}"
+            )
             try:
                 await self.page.keyboard.press(f"{shortcut_modifier}+{shortcut_key}")
             except asyncio.CancelledError:
@@ -591,7 +582,9 @@ class InputController(BaseController):
                     await prompt_textarea_locator.input_value(timeout=2000) or ""
                 )
                 if original_content and not current_content.strip():
-                    self.logger.info("验证方法1: 输入框已清空，组合键提交成功")
+                    self.logger.info(
+                        "Verification method 1: Input cleared, combo submission successful"
+                    )
                     submission_success = True
                 if not submission_success:
                     submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
@@ -601,7 +594,7 @@ class InputController(BaseController):
                         )
                         if is_disabled:
                             self.logger.info(
-                                "验证方法2: 提交按钮已禁用，组合键提交成功"
+                                "Verification method 2: Submit button disabled, combo submission successful"
                             )
                             submission_success = True
                     except Exception:
@@ -617,7 +610,7 @@ class InputController(BaseController):
                             is_vis = await last_container.is_visible(timeout=1000)
                             if is_vis:
                                 self.logger.info(
-                                    "验证方法3: 检测到响应容器，组合键提交成功"
+                                    "Verification method 3: Response container detected, combo submission successful"
                                 )
                                 submission_success = True
                     except Exception:
@@ -625,17 +618,19 @@ class InputController(BaseController):
             except Exception as verify_err:
                 if isinstance(verify_err, asyncio.CancelledError):
                     raise
-                self.logger.warning(f"组合键提交验证过程出错: {verify_err}")
+                self.logger.warning(
+                    f"Error during combo submission verification: {verify_err}"
+                )
                 submission_success = True
 
             if submission_success:
-                self.logger.info("组合键提交成功")
+                self.logger.info("Combo submission successful")
                 return True
             else:
-                self.logger.warning("组合键提交验证失败")
+                self.logger.warning("Combo submission verification failed")
                 return False
         except Exception as combo_err:
             if isinstance(combo_err, asyncio.CancelledError):
                 raise
-            self.logger.warning(f"组合键提交失败: {combo_err}")
+            self.logger.warning(f"Combo submission failed: {combo_err}")
             return False

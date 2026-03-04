@@ -1,74 +1,73 @@
-# Contributing to AI Studio Proxy API
+# 贡献指南
 
-Thank you for your interest in contributing! We welcome bug reports, feature requests, and pull requests.
+感谢你参与 AI Studio Proxy API 的改进。
 
-## Getting Started
-
-### Fork & Clone
+## 本地开发准备
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/AIstudioProxyAPI.git
+git clone https://github.com/CJackHwang/AIstudioProxyAPI.git
 cd AIstudioProxyAPI
-```
-
-### Install Dependencies
-
-```bash
-# Install Poetry (if not already installed)
-curl -sSL https://install.python-poetry.org | python3 -
-
-# Install dependencies
 poetry install --with dev
 ```
 
-### Run the Test Suite
+## 提交前检查（必须）
 
 ```bash
+poetry run ruff check .
+poetry run pyright
 poetry run pytest
 ```
 
-## Making Changes
+如涉及前端改动，请额外执行：
 
-1. **Create a branch**: `git checkout -b feature/your-feature`
-2. **Make your changes**
-3. **Run checks** before committing:
-   ```bash
-   poetry run ruff check .
-   poetry run ruff format .
-   poetry run pyright
-   poetry run pytest
-   ```
-4. **Commit** using [Conventional Commits](https://www.conventionalcommits.org/):
-   - `feat:` New feature
-   - `fix:` Bug fix
-   - `docs:` Documentation
-   - `refactor:` Code restructuring
-5. **Open a Pull Request**
+```bash
+cd static/frontend
+npm ci
+npm run build
+npm run test
+```
 
-## Code Style
+## 分支与提交规范
 
-We use:
+- 新功能：`feat/...`
+- 缺陷修复：`fix/...`
+- 文档改动：`docs/...`
+- 重构：`refactor/...`
 
-- **Ruff** for linting and formatting
-- **Pyright** for type checking
-- **80% test coverage** minimum for modified files
+建议使用 Conventional Commits：
 
-See [Development Guide](docs/development-guide.md) for detailed coding conventions.
+- `feat:` 新能力
+- `fix:` 缺陷修复
+- `docs:` 文档更新
+- `refactor:` 重构
+- `test:` 测试改进
+- `chore:` 工程性调整
 
-## Reporting Issues
+## Pull Request 要求
 
-Please include:
+- 说明变更动机、核心实现和影响范围。
+- 如涉及配置/接口变更，必须更新文档。
+- 引入新环境变量时，必须同步更新 `.env.example`。
+- 通过 CI 检查后再请求合并。
 
-- Steps to reproduce
-- Expected vs actual behavior
-- Python version and OS
-- Relevant logs (from `errors_py/` if available)
+## CI/CD 工作流
 
-## Questions?
+- `PR Check`：运行 lint/typecheck/tests。
+- `Release`：tag 或手动触发发布。
+- `Sync with Upstream`：从上游仓库同步提交并自动建 PR。
 
-- Check [Troubleshooting Guide](docs/troubleshooting.md)
-- Open a Discussion or Issue
+## 参考文档
 
-## License
+- [快速开始](docs/quick-start.md)
+- [配置参考](docs/configuration-reference.md)
+- [排障指南](docs/troubleshooting.md)
+- [开发、测试与发布](docs/development-and-release.md)
 
-Contributions are licensed under [AGPLv3](LICENSE).
+## Issue 反馈建议
+
+请尽量提供：
+
+- 复现步骤
+- 期望行为与实际行为
+- Python 版本 / 操作系统
+- 相关日志（如 `logs/`、`errors_py/`）

@@ -5,6 +5,7 @@ Endpoints for managing browser proxy settings and testing connectivity.
 """
 
 import socket
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(prefix="/api/proxy", tags=["proxy"])
 
-# Config file path (same location as gui_config.json in deprecated GUI)
+# Config file path
 _CONFIG_DIR = Path(__file__).parent.parent.parent
 _PROXY_CONFIG_FILE = _CONFIG_DIR / "proxy_config.json"
 
@@ -31,15 +32,17 @@ class ProxyConfig(BaseModel):
         """Validate proxy address format."""
         v = v.strip()
         if v and not (v.startswith("http://") or v.startswith("https://")):
-            raise ValueError("代理地址必须以 http:// 或 https:// 开头")
+            raise ValueError("Proxy address must start with http:// or https://")
         return v
 
 
 class ProxyTestRequest(BaseModel):
     """Request model for proxy test."""
 
-    address: str = Field(..., description="代理地址")
-    test_url: str = Field(default="http://httpbin.org/get", description="测试目标URL")
+    address: str = Field(..., description="Proxy address")
+    test_url: str = Field(
+        default="http://httpbin.org/get", description="Test target URL"
+    )
 
 
 class ProxyTestResult(BaseModel):
@@ -75,23 +78,21 @@ def _save_config(config: ProxyConfig) -> None:
 
 @router.get("/config")
 async def get_proxy_config() -> JSONResponse:
-    """获取当前代理配置。"""
+    """Get current proxy configuration."""
     config = _load_config()
     return JSONResponse(content=config.model_dump())
 
 
 @router.post("/config")
 async def update_proxy_config(config: ProxyConfig) -> JSONResponse:
-    """更新代理配置。"""
+    """Update proxy configuration."""
     _save_config(config)
     return JSONResponse(content={"success": True, "config": config.model_dump()})
 
 
 @router.post("/test")
 async def test_proxy_connectivity(request: ProxyTestRequest) -> JSONResponse:
-    """测试代理连接性。"""
-    import time
-
+    """Test proxy connectivity."""
     import httpx
 
     proxy_addr = request.address.strip()
@@ -100,7 +101,7 @@ async def test_proxy_connectivity(request: ProxyTestRequest) -> JSONResponse:
     if not proxy_addr:
         return JSONResponse(
             content=ProxyTestResult(
-                success=False, message="代理地址不能为空"
+                success=False, message="Proxy address cannot be empty"
             ).model_dump(),
             status_code=400,
         )
@@ -119,7 +120,7 @@ async def test_proxy_connectivity(request: ProxyTestRequest) -> JSONResponse:
                 return JSONResponse(
                     content=ProxyTestResult(
                         success=True,
-                        message=f"连接成功 (HTTP {response.status_code})",
+                        message=f"Connection successful (HTTP {response.status_code})",
                         latency_ms=round(latency, 2),
                     ).model_dump()
                 )
@@ -127,7 +128,7 @@ async def test_proxy_connectivity(request: ProxyTestRequest) -> JSONResponse:
                 return JSONResponse(
                     content=ProxyTestResult(
                         success=False,
-                        message=f"HTTP 错误: {response.status_code}",
+                        message=f"HTTP Error: {response.status_code}",
                         latency_ms=round(latency, 2),
                     ).model_dump()
                 )
@@ -135,26 +136,28 @@ async def test_proxy_connectivity(request: ProxyTestRequest) -> JSONResponse:
     except httpx.ProxyError as e:
         return JSONResponse(
             content=ProxyTestResult(
-                success=False, message=f"代理错误: {e}"
+                success=False, message=f"Proxy error: {e}"
             ).model_dump()
         )
     except httpx.ConnectTimeout:
         return JSONResponse(
-            content=ProxyTestResult(success=False, message="连接超时").model_dump()
+            content=ProxyTestResult(
+                success=False, message="Connection timeout"
+            ).model_dump()
         )
     except httpx.ReadTimeout:
         return JSONResponse(
-            content=ProxyTestResult(success=False, message="读取超时").model_dump()
+            content=ProxyTestResult(success=False, message="Read timeout").model_dump()
         )
     except socket.gaierror as e:
         return JSONResponse(
             content=ProxyTestResult(
-                success=False, message=f"DNS 解析失败: {e}"
+                success=False, message=f"DNS resolution failed: {e}"
             ).model_dump()
         )
     except Exception as e:
         return JSONResponse(
             content=ProxyTestResult(
-                success=False, message=f"未知错误: {e}"
+                success=False, message=f"Unknown error: {e}"
             ).model_dump()
         )

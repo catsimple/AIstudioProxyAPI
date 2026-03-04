@@ -16,6 +16,7 @@ import {
   CheckCircle,
   AlertCircle
 } from 'lucide-react';
+import { useI18n } from '@/contexts';
 import { ProxySettings } from './ProxySettings';
 import { AuthManager } from './AuthManager';
 import { PortConfiguration } from './PortConfig';
@@ -67,11 +68,13 @@ interface ServerStatus {
 }
 
 export function SettingsPage() {
+  const { t } = useI18n();
+  
   return (
     <div className={styles.settingsPage}>
       <h1 className={styles.pageTitle}>
         <Server size={24} />
-        服务器设置
+        {t.settingsPage.title}
       </h1>
       
       <div className={styles.sections}>
@@ -85,10 +88,10 @@ export function SettingsPage() {
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>
             <Network size={18} />
-            代理设置
+            {t.settingsPage.proxySettings}
           </h2>
           <p className={styles.sectionDesc}>
-            配置浏览器自动化使用的 HTTP/SOCKS5 代理。
+            {t.settingsPage.proxyDesc}
           </p>
           <ProxySettings />
         </section>
@@ -97,10 +100,10 @@ export function SettingsPage() {
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>
             <Shield size={18} />
-            认证管理
+            {t.settingsPage.authManagement}
           </h2>
           <p className={styles.sectionDesc}>
-            管理已保存的认证文件，切换不同账号。
+            {t.settingsPage.authDesc}
           </p>
           <AuthManager />
         </section>
@@ -109,10 +112,10 @@ export function SettingsPage() {
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>
             <Activity size={18} />
-            端口配置
+            {t.settingsPage.portConfig}
           </h2>
           <p className={styles.sectionDesc}>
-            配置服务端口，修改后需重启生效。
+            {t.settingsPage.portDesc}
           </p>
           <PortConfiguration />
         </section>
@@ -122,6 +125,7 @@ export function SettingsPage() {
 }
 
 function StatusBar() {
+  const { t } = useI18n();
   const { data: status, isLoading } = useQuery<ServerStatus>({
     queryKey: ['serverStatus'],
     queryFn: fetchServerStatus,
@@ -132,7 +136,7 @@ function StatusBar() {
     return (
       <div className={styles.statusBar}>
         <Loader2 className={styles.spinning} size={14} />
-        <span>加载中...</span>
+        <span>{t.settingsPage.loading}</span>
       </div>
     );
   }
@@ -141,7 +145,7 @@ function StatusBar() {
     <div className={styles.statusBar}>
       <span className={styles.statusChip}>
         <CheckCircle size={12} />
-        {status?.status || 'unknown'}
+        {status?.status || t.common.unknown}
       </span>
       <span className={styles.statusChip}>
         <Activity size={12} />
@@ -149,7 +153,7 @@ function StatusBar() {
       </span>
       <span className={styles.statusChip}>
         <Server size={12} />
-        Port {status?.server_port || '-'}
+        {t.settingsPage.port} {status?.server_port || '-'}
       </span>
       <span className={styles.statusChip}>
         {status?.launch_mode || '-'}
@@ -159,6 +163,7 @@ function StatusBar() {
 }
 
 function ApiKeysSection() {
+  const { t } = useI18n();
   const { data, isLoading, refetch } = useQuery<{ keys: string[] }>({
     queryKey: ['apiKeys'],
     queryFn: fetchApiKeys,
@@ -175,23 +180,24 @@ function ApiKeysSection() {
     try {
       await addApiKey(newKey.trim());
       setNewKey('');
-      setMessage({ type: 'success', text: 'API Key 已添加' });
+      setMessage({ type: 'success', text: t.settingsPage.keyAdded });
       refetch();
     } catch {
-      setMessage({ type: 'error', text: '添加失败' });
+      setMessage({ type: 'error', text: t.settingsPage.addFailed });
     } finally {
       setAdding(false);
     }
   };
 
   const handleDelete = async (key: string) => {
-    if (!confirm(`确定删除 API Key: ${key.substring(0, 8)}...?`)) return;
+    const confirmMsg = t.settingsPage.confirmDelete.replace('{key}', key.substring(0, 8));
+    if (!confirm(confirmMsg)) return;
     try {
       await deleteApiKey(key);
-      setMessage({ type: 'success', text: 'API Key 已删除' });
+      setMessage({ type: 'success', text: t.settingsPage.keyDeleted });
       refetch();
     } catch {
-      setMessage({ type: 'error', text: '删除失败' });
+      setMessage({ type: 'error', text: t.settingsPage.deleteFailed });
     }
   };
 
@@ -200,7 +206,7 @@ function ApiKeysSection() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>
           <Key size={18} />
-          API Keys
+          {t.settingsPage.apiKeys}
         </h2>
         <div className={styles.loading}>
           <Loader2 className={styles.spinning} size={20} />
@@ -213,13 +219,13 @@ function ApiKeysSection() {
     <section className={styles.section}>
       <h2 className={styles.sectionTitle}>
         <Key size={18} />
-        API Keys
+        {t.settingsPage.apiKeys}
         <button className={styles.refreshButton} onClick={() => refetch()}>
           <RefreshCw size={14} />
         </button>
       </h2>
       <p className={styles.sectionDesc}>
-        管理用于客户端认证的 API 密钥，允许多个应用访问服务。
+        {t.settingsPage.apiKeysDesc}
       </p>
       <div className={styles.keyList}>
         {data?.keys?.length ? (
@@ -230,12 +236,12 @@ function ApiKeysSection() {
                 className={styles.deleteButton}
                 onClick={() => handleDelete(key)}
               >
-                删除
+                {t.common.delete}
               </button>
             </div>
           ))
         ) : (
-          <div className={styles.emptyState}>无 API Keys</div>
+          <div className={styles.emptyState}>{t.settingsPage.noApiKeys}</div>
         )}
       </div>
       <div className={styles.addKeyForm}>
@@ -244,7 +250,7 @@ function ApiKeysSection() {
           className={styles.input}
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
-          placeholder="输入新的 API Key"
+          placeholder={t.settingsPage.enterNewKey}
         />
         <button 
           className={styles.addButton}
@@ -252,7 +258,7 @@ function ApiKeysSection() {
           disabled={adding || !newKey.trim()}
         >
           {adding ? <Loader2 className={styles.spinning} size={14} /> : null}
-          添加
+          {t.common.add}
         </button>
       </div>
       {message && (

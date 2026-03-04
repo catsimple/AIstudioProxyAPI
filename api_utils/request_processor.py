@@ -1,21 +1,17 @@
 """
 Request Processor Module
-Contains core request processing logic.
+Contains core request processing logic
 """
 
 import asyncio
 import json
-import logging
 import os
+import shutil
 from asyncio import Event, Future
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
-# Type aliases for common function signatures
-CheckClientDisconnected = Callable[[str], bool]
-Logger = logging.Logger
 from playwright.async_api import (
     Error as PlaywrightAsyncError,
 )
@@ -26,23 +22,32 @@ from playwright.async_api import (
     Page as AsyncPage,
 )
 
-# --- Browser Utils Imports ---
-from browser_utils import save_error_snapshot
+# --- browser_utils Module Imports ---
+from browser_utils import (
+    save_error_snapshot,
+)
 from browser_utils.page_controller import PageController
 
-# --- Config Imports ---
+# --- Configuration Module Imports ---
 from config import (
     MODEL_NAME,
-    ONLY_COLLECT_CURRENT_USER_ATTACHMENTS,
+    RESPONSE_COMPLETION_TIMEOUT,
     SUBMIT_BUTTON_SELECTOR,
     UPLOAD_FILES_DIR,
+    get_environment_variable,
 )
+from config.global_state import GlobalState
 
-# --- Logging Utils Imports ---
-from logging_utils import log_context, set_request_id, set_source
+# --- logging_utils Module Imports ---
+from logging_utils import log_context
 
-# --- Models Imports ---
-from models import ChatCompletionRequest, ClientDisconnectedError
+# --- models Module Imports ---
+from models import (
+    ChatCompletionRequest,
+    ClientDisconnectedError,
+    QuotaExceededError,
+    QuotaExceededRetry,
+)
 
 from .client_connection import (
     check_client_connection as _check_client_connection,
@@ -53,6 +58,12 @@ from .client_connection import (
 from .common_utils import random_id as _random_id
 from .context_init import initialize_request_context as _init_request_context
 from .context_types import RequestContext
+from .error_utils import (
+    bad_request,
+    client_disconnected,
+    server_error,
+    upstream_error,
+)
 from .model_switching import (
     analyze_model_requirements as ms_analyze,
 )
@@ -63,42 +74,48 @@ from .model_switching import (
     handle_parameter_cache as ms_param_cache,
 )
 from .page_response import locate_response_elements
-from .response_generators import gen_sse_from_aux_stream, gen_sse_from_playwright
+from .response_generators import (
+    gen_sse_from_aux_stream,
+    gen_sse_from_playwright,
+    resilient_stream_generator,
+)
 from .response_payloads import build_chat_completion_response_json
 
-# --- API Utils Imports ---
+# --- api_utils Module Imports ---
 from .utils import (
     maybe_execute_tools,
     prepare_combined_prompt,
 )
+from .utils_ext.files import collect_and_validate_attachments
+from .utils_ext.function_calling_orchestrator import (
+    FunctionCallingState,
+    get_function_calling_orchestrator,
+)
 from .utils_ext.stream import use_stream_response
 from .utils_ext.tokens import calculate_usage_stats
+from .utils_ext.usage_tracker import increment_profile_usage
 from .utils_ext.validation import validate_chat_request
 
 _initialize_request_context = _init_request_context
 
-# Error helpers
-from .error_utils import (
-    bad_request,
-    client_disconnected,
-    server_error,
-    upstream_error,
-)
+
+# Wrapper function for backward compatibility
+async def _test_client_connection(req_id: str, http_request) -> bool:
+    """Test if client is still connected - wrapper for _check_client_connection"""
+    return await _check_client_connection(req_id, http_request)
 
 
 async def _analyze_model_requirements(
     req_id: str, context: RequestContext, request: ChatCompletionRequest
 ) -> RequestContext:
-    """Delegates to model_switching.analyze_model_requirements"""
-    return await ms_analyze(req_id, context, request.model or "", MODEL_NAME)
+    """Proxy to model_switching.analyze_model_requirements"""
+    return await ms_analyze(req_id, context, request.model, MODEL_NAME)
 
 
 async def _validate_page_status(
-    req_id: str,
-    context: RequestContext,
-    check_client_disconnected: CheckClientDisconnected,
+    req_id: str, context: RequestContext, check_client_disconnected: Callable
 ) -> None:
-    """Validates page status"""
+    """Validate page status"""
     page = context["page"]
     is_page_ready = context["is_page_ready"]
 
@@ -113,61 +130,53 @@ async def _validate_page_status(
 
 
 async def _handle_model_switching(
-    req_id: str,
-    context: RequestContext,
-    check_client_disconnected: CheckClientDisconnected,
+    req_id: str, context: RequestContext, check_client_disconnected: Callable
 ) -> RequestContext:
-    """Delegates to model_switching.handle_model_switching"""
+    """Proxy to model_switching.handle_model_switching"""
     return await ms_switch(req_id, context)
 
 
-async def _handle_model_switch_failure(  # pyright: ignore[reportUnusedFunction] - Called by tests
-    req_id: str,
-    page: AsyncPage,
-    model_id_to_use: str,
-    model_before_switch: str,
-    logger: Logger,
+async def _handle_model_switch_failure(
+    req_id: str, page: AsyncPage, model_id_to_use: str, model_before_switch: str, logger
 ) -> None:
-    """Handles model switching failure"""
+    """Handle model switch failure"""
     from api_utils.server_state import state
 
-    set_request_id(req_id)
-    logger.warning(f"Model switch to {model_id_to_use} failed.")
-    # Try to restore global state
+    logger.warning(f"[{req_id}] Failed to switch model to {model_id_to_use}.")
+    # Attempt to restore global state
     state.current_ai_studio_model_id = model_before_switch
 
     raise HTTPException(
         status_code=422,
-        detail=f"[{req_id}] Failed to switch to model '{model_id_to_use}'. Please ensure model is available.",
+        detail=f"[{req_id}] Failed to switch to model '{model_id_to_use}'. Ensure model is available.",
     )
 
 
-async def _handle_parameter_cache(  # pyright: ignore[reportUnusedFunction] - Called by tests
-    req_id: str, context: RequestContext
-) -> None:
-    """Delegates to model_switching.handle_parameter_cache"""
+async def _handle_parameter_cache(req_id: str, context: RequestContext) -> None:
+    """Proxy to model_switching.handle_parameter_cache"""
     await ms_param_cache(req_id, context)
 
 
 async def _prepare_and_validate_request(
     req_id: str,
     request: ChatCompletionRequest,
-    check_client_disconnected: CheckClientDisconnected,
-) -> Tuple[str, List[str]]:
-    """Prepares and validates request, returns (combined_prompt, images_list)."""
+    check_client_disconnected: Callable,
+    fc_state: Optional[FunctionCallingState] = None,
+) -> Tuple[str, List[str], Optional[List[Dict[str, Any]]]]:
+    """Prepare and validate request, return (combined prompt, attachment path list, tool_exec_results)."""
     try:
         validate_chat_request(request.messages, req_id)
     except ValueError as e:
         raise bad_request(req_id, f"Invalid request: {e}")
 
-    prepared_prompt, images_list = prepare_combined_prompt(
+    prepared_prompt, attachments_list = prepare_combined_prompt(
         request.messages,
         req_id,
         getattr(request, "tools", None),
         getattr(request, "tool_choice", None),
+        fc_state=fc_state,
     )
-
-    # Active function execution based on tools/tool_choice (supports per-request MCP endpoint)
+    # Active function execution based on tools/tool_choice (supports per-request MCP endpoints)
     try:
         # Inject mcp_endpoint into utils.maybe_execute_tools registration logic
         if hasattr(request, "mcp_endpoint") and request.mcp_endpoint:
@@ -185,8 +194,7 @@ async def _prepare_and_validate_request(
         tool_exec_results = None
 
     check_client_disconnected("After Prompt Prep")
-
-    # Inline results at the end of prompt for web submission
+    # Inline results at the end of the prompt for submission together
     if tool_exec_results:
         try:
             for res in tool_exec_results:
@@ -194,64 +202,16 @@ async def _prepare_and_validate_request(
                 args = res.get("arguments")
                 result_str = res.get("result")
                 prepared_prompt += f"\n---\nTool Execution: {name}\nArguments:\n{args}\nResult:\n{result_str}\n"
-        except asyncio.CancelledError:
-            raise
         except Exception:
             pass
 
-    # Filter attachments if configured to only collect current user attachments
-    try:
-        if ONLY_COLLECT_CURRENT_USER_ATTACHMENTS:
-            latest_user = None
-            for msg in reversed(request.messages or []):
-                if getattr(msg, "role", None) == "user":
-                    latest_user = msg
-                    break
-            if latest_user is not None:
-                filtered: List[str] = []
-                import os
-                from urllib.parse import unquote, urlparse
+    # Process and validate attachments
+    # Acceptance criteria: Only accept data:/file:/absolute paths provided by current request
+    final_attachments = collect_and_validate_attachments(
+        request, req_id, attachments_list
+    )
 
-                from api_utils.utils import extract_data_url_to_local
-
-                # Collect data:/file:/absolute paths (existing) from this user message
-                getattr(latest_user, "content", None)
-                # Unified extraction from messages attachment fields
-                for key in ("attachments", "images", "files", "media"):
-                    arr: Any = getattr(latest_user, key, None)
-                    if not isinstance(arr, list):
-                        continue
-                    # Type narrowing after isinstance check
-                    for it in arr:
-                        url_value: Optional[str] = None
-                        if isinstance(it, str):
-                            url_value = it
-                        elif isinstance(it, dict):
-                            # Type narrowed to dict by isinstance
-                            url_value = str(it.get("url") or it.get("path") or "")
-                        if not url_value:
-                            continue
-                        url_value = url_value.strip()
-                        if not url_value:
-                            continue
-                        if url_value.startswith("data:"):
-                            fp: Optional[str] = extract_data_url_to_local(url_value)
-                            if fp:
-                                filtered.append(fp)
-                        elif url_value.startswith("file:"):
-                            parsed = urlparse(url_value)
-                            lp: str = unquote(parsed.path)
-                            if os.path.exists(lp):
-                                filtered.append(lp)
-                        elif os.path.isabs(url_value) and os.path.exists(url_value):
-                            filtered.append(url_value)
-                images_list = filtered
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        pass
-
-    return prepared_prompt, images_list
+    return prepared_prompt, final_attachments, tool_exec_results
 
 
 async def _handle_response_processing(
@@ -259,28 +219,18 @@ async def _handle_response_processing(
     request: ChatCompletionRequest,
     page: Optional[AsyncPage],
     context: RequestContext,
-    result_future: Future[Union[StreamingResponse, JSONResponse]],
-    submit_button_locator: Optional[Locator],
-    check_client_disconnected: CheckClientDisconnected,
-) -> Optional[Tuple[Optional[Event], Locator, CheckClientDisconnected]]:
-    """Handles response generation"""
-    import logging
-
-    logging.getLogger("AIStudioProxyServer")
-
-    context.get("current_ai_studio_model_id")
-
-    # Check if using auxiliary stream
-    from config import get_environment_variable
-
+    result_future: Future,
+    submit_button_locator: Locator,
+    check_client_disconnected: Callable,
+    prompt_length: int,
+    timeout: float,
+    silence_threshold: float = 60.0,
+) -> Optional[Tuple[Event, Locator, Callable]]:
+    """Handle response generation"""
     stream_port = get_environment_variable("STREAM_PORT")
     use_stream = stream_port != "0"
 
     if use_stream:
-        if submit_button_locator is None:
-            raise server_error(
-                req_id, "Submit button locator is None in _handle_response_processing"
-            )
         return await _handle_auxiliary_stream_response(
             req_id,
             request,
@@ -288,16 +238,10 @@ async def _handle_response_processing(
             result_future,
             submit_button_locator,
             check_client_disconnected,
+            timeout=timeout,
+            silence_threshold=silence_threshold,
         )
     else:
-        if page is None:
-            raise server_error(req_id, "Page is None in _handle_response_processing")
-        if submit_button_locator is None:
-            raise server_error(
-                req_id, "Submit button locator is None in _handle_response_processing"
-            )
-        # RequestContext is a TypedDict, which is structurally compatible with Dict[str, Any]
-        # at runtime, but we need explicit typing for the function signature
         return await _handle_playwright_response(
             req_id,
             request,
@@ -306,6 +250,8 @@ async def _handle_response_processing(
             result_future,
             submit_button_locator,
             check_client_disconnected,
+            prompt_length,
+            timeout=timeout,
         )
 
 
@@ -315,45 +261,51 @@ async def _handle_auxiliary_stream_response(
     context: RequestContext,
     result_future: Future[Union[StreamingResponse, JSONResponse]],
     submit_button_locator: Locator,
-    check_client_disconnected: CheckClientDisconnected,
-) -> Optional[Tuple[Optional[Event], Locator, CheckClientDisconnected]]:
-    """Auxiliary stream response path: converts STREAM_QUEUE data to OpenAI compatible SSE/JSON.
+    check_client_disconnected: Callable,
+    timeout: float,
+    silence_threshold: float = 60.0,
+) -> Optional[Tuple[Event, Locator, Callable]]:
+    """Auxiliary stream response processing path"""
+    from api_utils.server_state import state
 
-    - Streaming mode: Returns StreamingResponse, pushing delta and final usage incrementally.
-    - Non-streaming mode: Aggregates final content and function calls, returns JSONResponse.
-    """
-    import logging
-
-    logger = logging.getLogger("AIStudioProxyServer")
+    logger = state.logger
 
     is_streaming = request.stream
     current_ai_studio_model_id = context.get("current_ai_studio_model_id")
-    completion_event: Optional[Event] = None
 
     if is_streaming:
         try:
             completion_event = Event()
-            # 创建 stream_state 用于跟踪流是否收到内容
-            stream_state: Dict[str, Any] = {"has_content": False}
-            # Use generator as response body, handled by FastAPI for SSE push
-            stream_gen_func = gen_sse_from_aux_stream(
+            page = context["page"]
+
+            # [RESILIENT-WRAPPER] Wrap the stream generator with retry/rotation logic
+            def aux_stream_factory(event_to_signal: Event):
+                return gen_sse_from_aux_stream(
+                    req_id,
+                    request,
+                    current_ai_studio_model_id or MODEL_NAME,
+                    check_client_disconnected,
+                    event_to_signal,
+                    timeout=timeout,
+                    silence_threshold=silence_threshold,
+                    page=page,  # <--- CRITICAL: This enables the auto-scroll logic in stream.py
+                )
+
+            resilient_gen = resilient_stream_generator(
                 req_id,
-                request,
                 current_ai_studio_model_id or MODEL_NAME,
-                check_client_disconnected,
+                aux_stream_factory,
                 completion_event,
-                stream_state,
             )
+
             if not result_future.done():
                 result_future.set_result(
-                    StreamingResponse(stream_gen_func, media_type="text/event-stream")
+                    StreamingResponse(resilient_gen, media_type="text/event-stream")
                 )
             else:
                 if not completion_event.is_set():
                     completion_event.set()
 
-            # Return only first 3 elements to match function signature
-            # stream_state is used internally by the caller but not part of return type
             return (
                 completion_event,
                 submit_button_locator,
@@ -365,34 +317,43 @@ async def _handle_auxiliary_stream_response(
                 completion_event.set()
             raise
         except Exception as e:
-            logger.error(f"Error getting stream data from queue: {e}", exc_info=True)
-            if completion_event and not completion_event.is_set():
-                completion_event.set()
+            logger.error(
+                f"[{req_id}] Error getting stream data from queue: {e}", exc_info=True
+            )
             raise
+    else:
+        # Non-streaming logic using auxiliary stream
+        content = None
+        reasoning_content = None
+        functions = None
+        final_data_from_aux_stream = None
 
-    else:  # Non-streaming
-        content: Optional[str] = None
-        reasoning_content: Optional[str] = None
-        functions: Optional[List[Dict[str, Any]]] = None
-        final_data_from_aux_stream: Optional[Dict[str, Any]] = None
+        page = context["page"]
+        # Disable silence detection for non-streaming requests to prevent premature timeouts
+        async for raw_data in use_stream_response(
+            req_id,
+            page=page,
+            check_client_disconnected=check_client_disconnected,
+            timeout=timeout,
+            silence_threshold=silence_threshold,
+            enable_silence_detection=False,
+        ):
+            check_client_disconnected(f"Non-streaming aux stream - loop ({req_id}): ")
 
-        # Non-streaming: Consume auxiliary queue final result and assemble JSON response
-        async for raw_data in use_stream_response(req_id):
-            check_client_disconnected(f"Non-streaming Aux Stream - Loop ({req_id}): ")
-
-            # Ensure data is dict type
-            data: Dict[str, Any]
             if isinstance(raw_data, str):
                 try:
                     data = json.loads(raw_data)
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse non-stream data JSON: {raw_data}")
+                    logger.warning(
+                        f"[{req_id}] Failed to parse non-stream data JSON: {raw_data}"
+                    )
                     continue
             elif isinstance(raw_data, dict):
-                # Type narrowed to dict by isinstance check
-                data = raw_data  # type: Dict[str, Any]
+                data = raw_data
             else:
-                logger.warning(f"Non-stream unknown data type: {type(raw_data)}")
+                continue
+
+            if not isinstance(data, dict):
                 continue
 
             final_data_from_aux_stream = data
@@ -407,7 +368,7 @@ async def _handle_auxiliary_stream_response(
             and final_data_from_aux_stream.get("reason") == "internal_timeout"
         ):
             logger.error(
-                "Non-streaming request failed via aux stream: Internal Timeout"
+                f"[{req_id}] Non-stream request failed via aux stream: Internal Timeout"
             )
             raise HTTPException(
                 status_code=502,
@@ -418,10 +379,9 @@ async def _handle_auxiliary_stream_response(
             final_data_from_aux_stream
             and final_data_from_aux_stream.get("done") is True
             and content is None
-            and not functions
         ):
             logger.error(
-                "Non-streaming request completed via aux stream but no content provided"
+                f"[{req_id}] Non-stream request completed via aux stream but no content provided"
             )
             raise HTTPException(
                 status_code=502,
@@ -429,13 +389,21 @@ async def _handle_auxiliary_stream_response(
             )
 
         model_name_for_json = current_ai_studio_model_id or MODEL_NAME
-        message_payload: Dict[str, Any] = {"role": "assistant", "content": content}
+
+        # Consolidate reasoning content with body content
+        consolidated_content = ""
+        if reasoning_content and reasoning_content.strip():
+            consolidated_content += reasoning_content.strip()
+        if content and content.strip():
+            if consolidated_content:
+                consolidated_content += "\n\n"
+            consolidated_content += content.strip()
+
+        message_payload = {"role": "assistant", "content": consolidated_content}
         finish_reason_val = "stop"
 
         if functions and len(functions) > 0:
             tool_calls_list: List[Dict[str, Any]] = []
-            func_idx: int
-            function_call_data: Dict[str, Any]
             for func_idx, function_call_data in enumerate(functions):
                 tool_calls_list.append(
                     {
@@ -452,14 +420,22 @@ async def _handle_auxiliary_stream_response(
             finish_reason_val = "tool_calls"
             message_payload["content"] = None
 
-        if reasoning_content:
-            message_payload["reasoning_content"] = reasoning_content
-
         usage_stats = calculate_usage_stats(
             [msg.model_dump() for msg in request.messages],
-            content or "",
-            reasoning_content or "",
+            consolidated_content or "",
+            "",
         )
+
+        total_tokens = usage_stats.get("total_tokens", 0)
+        GlobalState.increment_token_count(total_tokens)
+
+        from api_utils.server_state import state
+
+        if (
+            hasattr(state, "current_auth_profile_path")
+            and state.current_auth_profile_path
+        ):
+            await increment_profile_usage(state.current_auth_profile_path, total_tokens)
 
         response_payload = build_chat_completion_response_json(
             req_id,
@@ -480,65 +456,151 @@ async def _handle_auxiliary_stream_response(
         )
 
         if not result_future.done():
-            result_future.set_result(JSONResponse(content=response_payload))
-        return None
+            response_json_str = json.dumps(response_payload, ensure_ascii=False)
+            if len(response_json_str) > 10000:  # 10KB threshold
+                logger.info(
+                    f"[{req_id}] Large response detected ({len(response_json_str)} chars), using efficient chunking"
+                )
+
+                async def generate_json_chunks():
+                    chunk_size = 8192  # 8KB chunks
+                    for i in range(0, len(response_json_str), chunk_size):
+                        chunk = response_json_str[i : i + chunk_size]
+                        yield chunk
+                        await asyncio.sleep(0.01)
+
+                result_future.set_result(
+                    StreamingResponse(
+                        generate_json_chunks(), media_type="application/json"
+                    )
+                )
+            else:
+                result_future.set_result(JSONResponse(content=response_payload))
+        return response_payload
 
 
 async def _handle_playwright_response(
     req_id: str,
     request: ChatCompletionRequest,
     page: AsyncPage,
-    context: Union[RequestContext, Dict[str, Any]],
-    result_future: Future[Union[StreamingResponse, JSONResponse]],
+    context: dict,
+    result_future: Future,
     submit_button_locator: Locator,
-    check_client_disconnected: CheckClientDisconnected,
-) -> Optional[Tuple[Optional[Event], Locator, CheckClientDisconnected]]:
-    """Handle response using Playwright"""
-    import logging
+    check_client_disconnected: Callable,
+    prompt_length: int,
+    timeout: float,
+) -> Optional[Tuple[Event, Locator, Callable]]:
+    """Handle response using Playwright - Enhanced version with integrity verification"""
+    from api_utils.server_state import state
 
-    logger = logging.getLogger("AIStudioProxyServer")
+    logger = state.logger
 
     is_streaming = request.stream
     current_ai_studio_model_id = context.get("current_ai_studio_model_id")
 
     await locate_response_elements(page, req_id, logger, check_client_disconnected)
-
     check_client_disconnected("After Response Element Located: ")
 
     if is_streaming:
         completion_event = Event()
-        stream_gen_func = gen_sse_from_playwright(
-            page,
-            logger,
+
+        def playwright_stream_factory(event_to_signal: Event):
+            return gen_sse_from_playwright(
+                page,
+                logger,
+                req_id,
+                current_ai_studio_model_id or MODEL_NAME,
+                request,
+                check_client_disconnected,
+                event_to_signal,
+                prompt_length=prompt_length,
+                timeout=timeout,
+            )
+
+        resilient_gen = resilient_stream_generator(
             req_id,
             current_ai_studio_model_id or MODEL_NAME,
-            request,
-            check_client_disconnected,
+            playwright_stream_factory,
             completion_event,
         )
+
         if not result_future.done():
             result_future.set_result(
-                StreamingResponse(stream_gen_func, media_type="text/event-stream")
+                StreamingResponse(resilient_gen, media_type="text/event-stream")
             )
 
         return completion_event, submit_button_locator, check_client_disconnected
     else:
-        # Use PageController to get response
         page_controller = PageController(page, logger, req_id)
-        final_content = await page_controller.get_response(check_client_disconnected)
+        response_data = await page_controller.get_response_with_integrity_check(
+            check_client_disconnected, prompt_length, timeout=timeout
+        )
 
-        # Calculate token usage stats
+        final_content = response_data.get("content", "")
+        reasoning_content = response_data.get("reasoning_content", "")
+        recovery_method = response_data.get("recovery_method", "direct")
+
+        if recovery_method == "integrity_verification":
+            logger.info(
+                f"[{req_id}] Successfully recovered content via integrity verification ({len(final_content)} chars)"
+            )
+            await save_error_snapshot(
+                f"integrity_recovery_success_{req_id}",
+                extra_context={
+                    "content_length": len(final_content),
+                    "reasoning_length": len(reasoning_content),
+                    "recovery_trigger": response_data.get("trigger_reason", ""),
+                },
+            )
+        elif recovery_method == "direct":
+            logger.info(
+                f"[{req_id}] Successfully retrieved content directly ({len(final_content)} chars)"
+            )
+
+        consolidated_content = ""
+        if reasoning_content and reasoning_content.strip():
+            consolidated_content += reasoning_content.strip()
+        if final_content and final_content.strip():
+            if consolidated_content:
+                consolidated_content += "\n\n"
+            consolidated_content += final_content.strip()
+
         usage_stats = calculate_usage_stats(
             [msg.model_dump() for msg in request.messages],
-            final_content,
-            "",  # Playwright mode has no reasoning content
+            consolidated_content,
+            "",
         )
-        logger.info(f"Playwright non-streaming token usage stats: {usage_stats}")
+        logger.info(f"[{req_id}] Token usage stats: {usage_stats}")
 
-        # Unified OpenAI compatible response construction
+        total_tokens = usage_stats.get("total_tokens", 0)
+        GlobalState.increment_token_count(total_tokens)
+
+        from api_utils.server_state import state
+
+        if (
+            hasattr(state, "current_auth_profile_path")
+            and state.current_auth_profile_path
+        ):
+            await increment_profile_usage(state.current_auth_profile_path, total_tokens)
+
         model_name_for_json = current_ai_studio_model_id or MODEL_NAME
-        message_payload = {"role": "assistant", "content": final_content}
-        finish_reason_val = "stop"
+
+        # Handle function calls if detected
+        if response_data.get("has_function_calls"):
+            from api_utils.utils_ext.function_calling_orchestrator import (
+                get_function_calling_orchestrator,
+            )
+
+            orchestrator = get_function_calling_orchestrator()
+            message_payload, finish_reason_val = (
+                orchestrator.format_function_calls_for_response(
+                    response_data.get("function_calls", []), consolidated_content
+                )
+            )
+        else:
+            message_payload = {"role": "assistant", "content": consolidated_content}
+            finish_reason_val = "stop"
+
         response_payload = build_chat_completion_response_json(
             req_id,
             model_name_for_json,
@@ -558,26 +620,37 @@ async def _handle_playwright_response(
         )
 
         if not result_future.done():
-            result_future.set_result(JSONResponse(content=response_payload))
+            response_json_str = json.dumps(response_payload, ensure_ascii=False)
+            if len(response_json_str) > 10000:
 
-        return None
+                async def generate_json_chunks():
+                    chunk_size = 8192
+                    for i in range(0, len(response_json_str), chunk_size):
+                        yield response_json_str[i : i + chunk_size]
+                        await asyncio.sleep(0.01)
+
+                result_future.set_result(
+                    StreamingResponse(
+                        generate_json_chunks(), media_type="application/json"
+                    )
+                )
+            else:
+                result_future.set_result(JSONResponse(content=response_payload))
+
+        return response_payload
 
 
 async def _cleanup_request_resources(
     req_id: str,
-    disconnect_check_task: Optional[asyncio.Task[None]],
+    disconnect_check_task: Optional[asyncio.Task],
     completion_event: Optional[Event],
-    result_future: Future[Union[StreamingResponse, JSONResponse]],
+    result_future: Future,
     is_streaming: bool,
 ) -> None:
-    """Clean up request resources"""
-    import logging
+    """Cleanup request resources"""
+    from api_utils.server_state import state
 
-    logger = logging.getLogger("AIStudioProxyServer")
-    import shutil
-
-    # 确保日志上下文已设置
-    set_request_id(req_id)
+    logger = state.logger
 
     if disconnect_check_task and not disconnect_check_task.done():
         disconnect_check_task.cancel()
@@ -586,9 +659,7 @@ async def _cleanup_request_resources(
         except asyncio.CancelledError:
             pass
 
-    # Processing logged at higher level
-
-    # Clean up upload subdirectory for this request to avoid disk accumulation
+    # Clean up upload subdirectory
     try:
         req_dir = os.path.join(UPLOAD_FILES_DIR, req_id)
         if os.path.isdir(req_dir):
@@ -597,7 +668,7 @@ async def _cleanup_request_resources(
     except asyncio.CancelledError:
         raise
     except Exception as clean_err:
-        logger.warning(f"Failed to clean upload directory: {clean_err}")
+        logger.warning(f"[{req_id}] Failed to clean up upload directory: {clean_err}")
 
     if (
         is_streaming
@@ -605,39 +676,89 @@ async def _cleanup_request_resources(
         and not completion_event.is_set()
         and (result_future.done() and result_future.exception() is not None)
     ):
-        logger.warning("Streaming request exception, ensuring completion event is set.")
+        logger.warning(
+            f"[{req_id}] Stream request exception, ensuring completion event is set."
+        )
         completion_event.set()
-    return None
 
 
-async def _process_request_refactored(  # pyright: ignore[reportUnusedFunction] - Called by queue_worker.py
+async def process_request_with_retry(
     req_id: str,
     request: ChatCompletionRequest,
     http_request: Request,
-    result_future: Future[Union[StreamingResponse, JSONResponse]],
-) -> Optional[Tuple[Optional[Event], Locator, CheckClientDisconnected]]:
-    """Core request processing function - Refactored"""
-    # 设置日志上下文 (Grid Logger)
-    set_request_id(req_id)
-    set_source("PROCESSOR")
+    result_future: Future,
+) -> Optional[Tuple[Event, Locator, Callable[[str], bool]]]:
+    """Wrapper around _process_request_refactored with retry mechanism for quota"""
+    from api_utils.server_state import state
 
-    # Optimization: Proactively check client connection before starting any processing
-    import logging
+    logger = state.logger
 
-    logger = logging.getLogger("AIStudioProxyServer")
-    from config import get_environment_variable
+    max_retries = 3
+    attempt = 0
+    while attempt < max_retries:
+        attempt += 1
+        try:
+            return await _process_request_refactored(
+                req_id, request, http_request, result_future
+            )
+        except QuotaExceededRetry:
+            logger.warning(
+                f"[{req_id}] Quota wall hit (attempt {attempt}/{max_retries}). Waiting for rotation..."
+            )
+            await GlobalState.rotation_complete_event.wait()
+            logger.info(f"[{req_id}] Rotation complete. Retrying request.")
+            continue
+    logger.error(f"[{req_id}] Request failed after {max_retries} retries due to quota.")
+    raise Exception(f"Request failed after {max_retries} retries due to quota issues.")
 
-    is_connected = await _check_client_connection(req_id, http_request)
+
+async def process_request(
+    req_id: str,
+    request: ChatCompletionRequest,
+    http_request: Request,
+    result_future: Future,
+) -> Optional[Tuple[Event, Locator, Callable[[str], bool]]]:
+    """Main entry point for request processing"""
+    return await process_request_with_retry(
+        req_id, request, http_request, result_future
+    )
+
+
+async def _process_request_refactored(
+    req_id: str,
+    request: ChatCompletionRequest,
+    http_request: Request,
+    result_future: Future,
+) -> Optional[Tuple[Event, Locator, Callable[[str], bool]]]:
+    """Core Request Processing Function - Refactored Version"""
+    from api_utils.server_state import state
+
+    logger = state.logger
+
+    # 0. Check Auth Rotation Lock
+    if not GlobalState.AUTH_ROTATION_LOCK.is_set():
+        logger.info(f"[{req_id}] Request held: Waiting for auth rotation...")
+        await GlobalState.AUTH_ROTATION_LOCK.wait()
+        logger.info(f"[{req_id}] ▶️ Resuming after Auth Rotation.")
+
+    # [GR-03] Pre-Flight Graceful Rotation Check
+    if GlobalState.NEEDS_ROTATION:
+        logger.info(f"[{req_id}] 🔄 Graceful Rotation Pending. Initiating rotation...")
+        from api_utils.server_state import state
+
+        current_model_id = state.current_ai_studio_model_id
+        from browser_utils.auth_rotation import perform_auth_rotation
+
+        if await perform_auth_rotation(target_model_id=current_model_id):
+            GlobalState.NEEDS_ROTATION = False
+            logger.info(f"[{req_id}] ✅ Pre-flight rotation complete.")
+
+    is_connected = await _test_client_connection(req_id, http_request)
     if not is_connected:
-        logger.info(
-            "Client disconnected before core processing, exiting early to save resources"
-        )
+        logger.info(f"[{req_id}] Client disconnected before processing.")
         if not result_future.done():
             result_future.set_exception(
-                HTTPException(
-                    status_code=499,
-                    detail=f"[{req_id}] Client disconnected before processing started",
-                )
+                HTTPException(status_code=499, detail="Client disconnected")
             )
         return None
 
@@ -651,13 +772,13 @@ async def _process_request_refactored(  # pyright: ignore[reportUnusedFunction] 
         except asyncio.CancelledError:
             raise
         except Exception as clear_err:
-            logger.warning(f"[Stream] 清空队列错误: {clear_err}")
+            logger.warning(f"[Stream] Error clearing queue: {clear_err}")
 
     context = await _initialize_request_context(req_id, request)
     context = await _analyze_model_requirements(req_id, context, request)
 
     (
-        _,  # client_disconnected_event - not used, kept for unpacking
+        _,
         disconnect_check_task,
         check_client_disconnected,
     ) = await _setup_disconnect_monitoring(req_id, http_request, result_future)
@@ -668,58 +789,127 @@ async def _process_request_refactored(  # pyright: ignore[reportUnusedFunction] 
 
     try:
         await _validate_page_status(req_id, context, check_client_disconnected)
-
         if page is None:
-            raise server_error(req_id, "Page is None in _process_request_refactored")
+            raise server_error(req_id, "Page is None")
 
         page_controller = PageController(page, context["logger"], req_id)
-
         await _handle_model_switching(req_id, context, check_client_disconnected)
         await _handle_parameter_cache(req_id, context)
 
-        # Wrap entire processing section in silent context for visual hierarchy
-        # This creates the base indentation level for Prompt Prep, Parameters, and Execution
-        with log_context("", context["logger"], silent=True):
-            prepared_prompt, image_list = await _prepare_and_validate_request(
-                req_id, request, check_client_disconnected
+        # --- Native Function Calling Setup (Phase 3) ---
+        # Configure native function calling if mode is native/auto and tools are present
+        fc_orchestrator = get_function_calling_orchestrator()
+        fc_state: Optional[FunctionCallingState] = None
+
+        if getattr(request, "tools", None):
+            try:
+                fc_state = await fc_orchestrator.prepare_request(
+                    tools=request.tools,
+                    tool_choice=getattr(request, "tool_choice", None),
+                    page_controller=page_controller,
+                    check_client_disconnected=check_client_disconnected,
+                    req_id=req_id,
+                )
+            except Exception as fc_err:
+                logger.warning(
+                    f"[{req_id}] Function calling setup failed: {fc_err}, continuing with emulated mode"
+                )
+                # Continue with request - fallback to emulated mode happens in prepare_combined_prompt
+
+        (
+            prepared_prompt,
+            attachments_list,
+            tool_exec_results,
+        ) = await _prepare_and_validate_request(
+            req_id, request, check_client_disconnected, fc_state=fc_state
+        )
+
+        # [TOOL-FORCED] If tool was executed locally (forced), return immediately bypassing AI Studio flow
+        if tool_exec_results:
+            logger.info(
+                f"[{req_id}] Active tool execution detected, returning results immediately."
+            )
+            tool_calls_list = []
+            for res in tool_exec_results:
+                tool_calls_list.append(
+                    {
+                        "id": f"call_{_random_id()}",
+                        "type": "function",
+                        "function": {
+                            "name": res["name"],
+                            "arguments": res["arguments"],
+                        },
+                    }
+                )
+
+            message_payload = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": tool_calls_list,
+            }
+
+            usage_stats = calculate_usage_stats(
+                [msg.model_dump() for msg in request.messages],
+                "",
+                "",
             )
 
-            # Extra merge of top-level and message-level attachments/files (compatible with history)
-            # Attachment source strategy: Only accept data:/file:/absolute paths (existing) explicitly provided in current request
-            from api_utils.utils import collect_and_validate_attachments
+            response_payload = build_chat_completion_response_json(
+                req_id,
+                request.model or MODEL_NAME,
+                message_payload,
+                "tool_calls",
+                usage_stats,
+                seed=request.seed
+                if hasattr(request, "seed") and request.seed is not None
+                else 0,
+            )
 
-            # image_list is already List[str] from _prepare_and_validate_request
-            image_list = collect_and_validate_attachments(request, req_id, image_list)
+            if not result_future.done():
+                result_future.set_result(JSONResponse(content=response_payload))
 
-            # Use PageController for page interaction
-            # Note: Chat history clearing moved to after queue processing lock release
+            # Return dummy event for forced tool execution to satisfy type requirement
+            dummy_event = Event()
+            dummy_event.set()
+            return dummy_event, submit_button_locator, check_client_disconnected
 
-            request_params = request.model_dump(exclude_none=True)
-            # Fix: If stop is explicitly set to None (e.g. sent as null), preserve it to avoid default fallback
-            if "stop" in request.model_fields_set and request.stop is None:
-                request_params["stop"] = None
+        request_params = request.model_dump(exclude_none=True)
+        if "stop" in request.model_fields_set and request.stop is None:
+            request_params["stop"] = None
 
-            # Wrap parameter adjustment in silent context
-            with log_context("Adjusting Parameters", context["logger"], silent=True):
-                await page_controller.adjust_parameters(
-                    request_params,
-                    context["page_params_cache"],
-                    context["params_cache_lock"],
-                    context["model_id_to_use"],
-                    context["parsed_model_list"],
-                    check_client_disconnected,
-                )
+        with log_context("Adjusting Parameters", context["logger"], silent=True):
+            await page_controller.adjust_parameters(
+                request_params,
+                context["page_params_cache"],
+                context["params_cache_lock"],
+                context["model_id_to_use"],
+                context["parsed_model_list"],
+                check_client_disconnected,
+            )
 
-            # Optimization: Final check of client connection before submitting prompt
-            check_client_disconnected("Final check before submitting prompt")
+        check_client_disconnected("Final check before submitting prompt")
 
-            # Wrap prompt submission in silent context
-            with log_context("Execution", context["logger"], silent=True):
-                await page_controller.submit_prompt(
-                    prepared_prompt, image_list, check_client_disconnected
-                )
+        with log_context("Execution", context["logger"], silent=True):
+            await page_controller.submit_prompt(
+                prepared_prompt, attachments_list, check_client_disconnected
+            )
 
-        # Response processing still needs to be here as it determines streaming vs non-streaming and sets future
+        # Sync page reference if changed
+        if page_controller.page != page:
+            logger.info(f"[{req_id}] Page updated, syncing references...")
+            page = page_controller.page
+            context["page"] = page
+            submit_button_locator = page.locator(SUBMIT_BUTTON_SELECTOR)
+
+        calc_timeout = 5.0 + (len(prepared_prompt) / 1000.0)
+        config_timeout = RESPONSE_COMPLETION_TIMEOUT / 1000.0
+        dynamic_timeout = max(calc_timeout, config_timeout)
+        dynamic_silence_threshold = max(60.0, dynamic_timeout / 2.0)
+
+        logger.info(
+            f"[{req_id}] Dynamic timeout: {dynamic_timeout:.2f}s, silence threshold: {dynamic_silence_threshold:.2f}s"
+        )
+
         response_result = await _handle_response_processing(
             req_id,
             request,
@@ -728,62 +918,53 @@ async def _process_request_refactored(  # pyright: ignore[reportUnusedFunction] 
             result_future,
             submit_button_locator,
             check_client_disconnected,
+            len(prepared_prompt),
+            timeout=dynamic_timeout,
+            silence_threshold=dynamic_silence_threshold,
         )
 
         if response_result:
-            # 动态解包，支持 3-tuple 和 4-tuple (带 stream_state)
-            if len(response_result) >= 1:
-                completion_event = response_result[0]
-            # 其他元素 (submit_btn_loc, check_client_disconnected, stream_state)
-            # 在 _process_request_refactored 返回时会被正确传递
+            if isinstance(response_result, dict):
+                return response_result, submit_button_locator, check_client_disconnected
+            if isinstance(response_result, tuple):
+                completion_event, _, _ = response_result
+                return (
+                    completion_event,
+                    submit_button_locator,
+                    check_client_disconnected,
+                )
 
-        if submit_button_locator is None:
-            # Should have been caught earlier, but for safety
-            return None
-
-        # 直接返回 response_result (可能是 3-tuple 或 4-tuple)
-        # queue_worker 已更新为动态处理不同长度的元组
-        # Type note: response_result can be 3-tuple or 4-tuple, we return only first 3 elements
-        # The return type allows Optional[Event], so None completion_event is valid
-        if response_result and len(response_result) >= 3:
-            # Extract first 3 elements: (Optional[Event], Locator, CheckClientDisconnected)
-            return (response_result[0], response_result[1], response_result[2])
-
-        # If no response_result, return the constructed tuple
-        # Note: completion_event can be None for non-streaming responses
-        return (completion_event, submit_button_locator, check_client_disconnected)
+        return completion_event, submit_button_locator, check_client_disconnected
 
     except ClientDisconnectedError as disco_err:
-        context["logger"].info(f"Caught client disconnected signal: {disco_err}")
+        logger.info(f"[{req_id}] Client disconnected: {disco_err}")
         if not result_future.done():
-            result_future.set_exception(
-                client_disconnected(req_id, "Client disconnected during processing.")
-            )
-    except asyncio.CancelledError:
-        context["logger"].info("Request cancelled.")
-        if not result_future.done():
-            result_future.cancel()
-        raise  # Re-raise CancelledError
+            result_future.set_exception(client_disconnected(req_id, "Disconnected"))
+        return completion_event, submit_button_locator, check_client_disconnected
     except HTTPException as http_err:
-        context["logger"].warning(
-            f"Caught HTTP Exception: {http_err.status_code} - {http_err.detail}"
-        )
+        logger.warning(f"[{req_id}] HTTP exception: {http_err.status_code}")
         if not result_future.done():
             result_future.set_exception(http_err)
+        return completion_event, submit_button_locator, check_client_disconnected
+    except QuotaExceededError as quota_err:
+        logger.warning(f"[{req_id}] Quota Exceeded: {quota_err}")
+        if not GlobalState.IS_QUOTA_EXCEEDED:
+            GlobalState.set_quota_exceeded(message=str(quota_err))
+        raise quota_err
     except PlaywrightAsyncError as pw_err:
-        context["logger"].error(f"Caught Playwright Error: {pw_err}")
-        await save_error_snapshot(f"process_playwright_error_{req_id}")
+        logger.error(f"[{req_id}] Playwright error: {pw_err}")
+        await save_error_snapshot(f"process_pw_error_{req_id}")
         if not result_future.done():
             result_future.set_exception(
-                upstream_error(req_id, f"Playwright interaction failed: {pw_err}")
+                upstream_error(req_id, f"Interaction failed: {pw_err}")
             )
+        return completion_event, submit_button_locator, check_client_disconnected
     except Exception as e:
-        context["logger"].exception("Caught unexpected error")
-        await save_error_snapshot(f"process_unexpected_error_{req_id}")
+        logger.exception(f"[{req_id}] Unexpected error")
+        await save_error_snapshot(f"process_error_{req_id}")
         if not result_future.done():
-            result_future.set_exception(
-                server_error(req_id, f"Unexpected server error: {e}")
-            )
+            result_future.set_exception(server_error(req_id, str(e)))
+        return completion_event, submit_button_locator, check_client_disconnected
     finally:
         await _cleanup_request_resources(
             req_id,
@@ -792,5 +973,3 @@ async def _process_request_refactored(  # pyright: ignore[reportUnusedFunction] 
             result_future,
             request.stream or False,
         )
-
-    return None

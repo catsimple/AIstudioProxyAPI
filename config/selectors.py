@@ -1,20 +1,17 @@
 """
-CSS选择器配置模块
-包含所有用于页面元素定位的CSS选择器
+CSS Selector Configuration Module
+Contains all CSS selectors used for page element location.
 """
 
-# --- 输入相关选择器 ---
-# 主输入 textarea 兼容当前和旧 UI 结构
-# 当前结构: ms-prompt-input-wrapper > ... > ms-autosize-textarea > textarea.textarea
+# --- Input Related Selectors ---
+# Main input textarea compatible with current and old UI structures
 PROMPT_TEXTAREA_SELECTOR = (
-    # 当前 UI 结构
-    "textarea.textarea, "  # 最直接的选择器
+    "textarea.textarea, "
     "ms-autosize-textarea textarea, "
     "ms-chunk-input textarea, "
     "ms-prompt-input-wrapper ms-autosize-textarea textarea, "
     'ms-prompt-input-wrapper textarea[aria-label*="prompt" i], '
     "ms-prompt-input-wrapper textarea, "
-    # 过渡期 UI (ms-prompt-box) - 已弃用但保留作为回退
     "ms-prompt-box ms-autosize-textarea textarea, "
     'ms-prompt-box textarea[aria-label="Enter a prompt"], '
     "ms-prompt-box textarea"
@@ -22,21 +19,23 @@ PROMPT_TEXTAREA_SELECTOR = (
 INPUT_SELECTOR = PROMPT_TEXTAREA_SELECTOR
 INPUT_SELECTOR2 = PROMPT_TEXTAREA_SELECTOR
 
-# --- 按钮选择器 ---
-# 发送按钮：优先匹配 prompt 区域内 aria-label="Run" 的提交按钮
-SUBMIT_BUTTON_SELECTOR = ( 
-    # 当前 UI 结构
+# --- Button Selectors ---
+# Submit button: prioritize primary submit button in prompt area
+SUBMIT_BUTTON_SELECTOR = (
+    # Current UI structure
     'ms-run-button button[type="submit"].ms-button-primary, '
-    'ms-run-button button[type="submit"], '   
-    # 旧版
+    'ms-run-button button[type="submit"], '
+    # Legacy selectors
     'ms-prompt-input-wrapper ms-run-button button[aria-label="Run"], '
     'ms-prompt-input-wrapper button[aria-label="Run"][type="submit"], '
     'button[aria-label="Run"].run-button, '
     'ms-run-button button[type="submit"].run-button, '
-    # 过渡期 UI (ms-prompt-box) - 已弃用但保留作为回退
     'ms-prompt-box ms-run-button button[aria-label="Run"], '
     'ms-prompt-box button[aria-label="Run"][type="submit"]'
 )
+
+REGENERATE_BUTTON_SELECTOR = 'button[aria-label="Regenerate draft"], button[aria-label="Regenerate response"], [data-testid*="regenerate"]'
+
 CLEAR_CHAT_BUTTON_SELECTOR = 'button[data-test-clear="outside"][aria-label="New chat"], button[aria-label="New chat"]'
 CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR = (
     'button.ms-button-primary:has-text("Discard and continue")'
@@ -47,18 +46,19 @@ UPLOAD_BUTTON_SELECTOR = (
     'button[aria-label^="Insert images"]'
 )
 
-# --- 响应相关选择器 ---
+# --- Response Selectors ---
 RESPONSE_CONTAINER_SELECTOR = "ms-chat-turn .chat-turn-container.model"
 RESPONSE_TEXT_SELECTOR = "ms-cmark-node.cmark-node"
 
-# --- 加载和状态选择器 ---
+# --- Loading and Status Selectors ---
 LOADING_SPINNER_SELECTOR = 'button[aria-label="Run"].run-button svg .stoppable-spinner'
 OVERLAY_SELECTOR = ".mat-mdc-dialog-inner-container"
 
-# --- 错误提示选择器 ---
+# --- Error Notification Selectors ---
 ERROR_TOAST_SELECTOR = "div.toast.warning, div.toast.error"
+QUOTA_EXCEEDED_SELECTOR = "ms-callout.error-callout .message"
 
-# --- 编辑相关选择器 ---
+# --- Edit Related Selectors ---
 EDIT_MESSAGE_BUTTON_SELECTOR = (
     "ms-chat-turn:last-child .actions-container button.toggle-edit-button"
 )
@@ -67,91 +67,232 @@ MESSAGE_TEXTAREA_SELECTOR = (
 )
 FINISH_EDIT_BUTTON_SELECTOR = 'ms-chat-turn:last-child .actions-container button.toggle-edit-button[aria-label="Stop editing"]'
 
-# --- 菜单和复制相关选择器 ---
+# --- Menu and Copy Selectors ---
 MORE_OPTIONS_BUTTON_SELECTOR = (
     "div.actions-container div ms-chat-turn-options div > button"
 )
 COPY_MARKDOWN_BUTTON_SELECTOR = "button.mat-mdc-menu-item:nth-child(4)"
 COPY_MARKDOWN_BUTTON_SELECTOR_ALT = 'div[role="menu"] button:has-text("Copy Markdown")'
 
-# --- 设置相关选择器 ---
+# --- Settings Selectors ---
 MAX_OUTPUT_TOKENS_SELECTOR = 'input[aria-label="Maximum output tokens"]'
 STOP_SEQUENCE_INPUT_SELECTOR = 'input[aria-label="Add stop token"]'
 MAT_CHIP_REMOVE_BUTTON_SELECTOR = 'mat-chip button.remove-button[aria-label*="Remove"]'
 TOP_P_INPUT_SELECTOR = (
     'ms-slider input[type="number"][max="1"], '
+    'ms-slider input.slider-number-input[aria-valuemax="1"], '
     'input.slider-number-input[aria-valuemax="1"]'
-    )
+)
 TEMPERATURE_INPUT_SELECTOR = (
     'ms-slider input[type="number"][max="2"], '
+    'ms-slider input.slider-number-input[aria-valuemax="2"], '
     'input.slider-number-input[aria-valuemax="2"]'
-    )
+)
 USE_URL_CONTEXT_SELECTOR = 'button[aria-label="Browse the url context"]'
 
-# --- 思考模式相关选择器 ---
-# 主思考开关：控制是否启用思考模式（总开关）
-# Flash模型使用 aria-label="Toggle thinking mode"
-# 回退: 旧版 data-test-toggle 属性
+# --- Thinking Mode Selectors ---
+THINKING_CONTAINER_SELECTOR = "ms-thought-accordion, ms-thought-chunk, [data-testid*='thinking'], [data-testid*='reasoning']"
+THINKING_HEADER_SELECTOR = "ms-thought-accordion .header, ms-thought-chunk .header, [data-testid*='thinking'] .header, [data-testid*='reasoning'] .header"
+THINKING_CONTENT_SELECTOR = "ms-thought-chunk .mat-expansion-panel-body, ms-thought-accordion .content, ms-thought-accordion .markdown-content, [data-testid*='thinking'] .content, [data-testid*='reasoning'] .content"
+THINKING_DIV_SELECTOR = "div.thinking-process, div.reasoning-process, [class*='thinking'], [class*='reasoning'], [class*='analysis']"
+THINKING_ACCORDION_SELECTOR = "ms-thought-accordion, ms-thought-chunk, [data-testid*='accordion'], [class*='accordion'][data-testid*='thinking'], [class*='accordion'][class*='thinking']"
+
+FINAL_RESPONSE_SELECTOR = "ms-text-chunk:not(:has(ms-thought-chunk)), ms-cmark-node.cmark-node:not(ms-thought-accordion .content):not(ms-thought-chunk .mat-expansion-panel-body), [data-testid*='response'], [class*='response-content'], .chat-response"
+ANSWER_TEXT_SELECTOR = "ms-cmark-node.cmark-node"
+
+COMPLETE_RESPONSE_CONTAINER_SELECTOR = "ms-chat-turn .chat-turn-container.model, [data-testid*='chat-turn'], [class*='chat-turn']"
+GENERATION_STATUS_SELECTOR = "button[aria-label*='Stop'], button[aria-label*='Generating'], [data-testid*='generating']"
+
 ENABLE_THINKING_MODE_TOGGLE_SELECTOR = (
     'button[role="switch"][aria-label="Toggle thinking mode"], '
     'mat-slide-toggle[data-test-toggle="enable-thinking"] button[role="switch"].mdc-switch, '
     '[data-test-toggle="enable-thinking"] button[role="switch"].mdc-switch'
 )
-# 手动预算开关：控制是否手动限制思考预算
-# Flash模型使用 aria-label="Toggle thinking budget between auto and manual"
-# 回退: 旧版 data-test-toggle 属性
+
 SET_THINKING_BUDGET_TOGGLE_SELECTOR = (
     'button[role="switch"][aria-label="Toggle thinking budget between auto and manual"], '
     'mat-slide-toggle[data-test-toggle="manual-budget"] button[role="switch"].mdc-switch, '
     '[data-test-toggle="manual-budget"] button[role="switch"].mdc-switch'
 )
-# 思考预算输入框
-# 思考预算滑块具有独特的 min="512" 属性（温度是 max="2"，TopP 是 max="1"）
-# 优先使用最精确的选择器，保留多层回退以应对 UI 变化
+
 THINKING_BUDGET_INPUT_SELECTOR = (
-    # 最精确: 使用 data-test-id 容器 + spinbutton
-    '[data-test-id="user-setting-budget-animation-wrapper"] input[type="number"], '
-    # 回退1: 使用独特的 min="512" 属性定位（仅思考预算滑块有此属性）
-    'input.slider-number-input[min="512"], '
-    'ms-slider input[type="number"][min="512"], '
-    # 回退2: 旧版 data-test-slider 属性
-    '[data-test-slider] input[type="number"]'
+    '[data-test-id="user-setting-budget-animation-wrapper"] input[type="number"]'
 )
 
-# 思考等级下拉
+THINKING_LEVEL_DROPDOWN_SELECTOR = 'mat-select[aria-label="Thinking Level"]'
 THINKING_LEVEL_SELECT_SELECTOR = '[role="combobox"][aria-label="Thinking Level"], mat-select[aria-label="Thinking Level"], [role="combobox"][aria-label="Thinking level"], mat-select[aria-label="Thinking level"]'
 THINKING_LEVEL_OPTION_LOW_SELECTOR = '[role="listbox"][aria-label="Thinking Level"] [role="option"]:has-text("Low"), [role="listbox"][aria-label="Thinking level"] [role="option"]:has-text("Low")'
 THINKING_LEVEL_OPTION_HIGH_SELECTOR = '[role="listbox"][aria-label="Thinking Level"] [role="option"]:has-text("High"), [role="listbox"][aria-label="Thinking level"] [role="option"]:has-text("High")'
 THINKING_LEVEL_OPTION_MEDIUM_SELECTOR = '[role="listbox"][aria-label="Thinking Level"] [role="option"]:has-text("Medium"), [role="listbox"][aria-label="Thinking level"] [role="option"]:has-text("Medium")'
 THINKING_LEVEL_OPTION_MINIMAL_SELECTOR = '[role="listbox"][aria-label="Thinking Level"] [role="option"]:has-text("Minimal"), [role="listbox"][aria-label="Thinking level"] [role="option"]:has-text("Minimal")'
 
-
-# --- Google Search Grounding ---
 GROUNDING_WITH_GOOGLE_SEARCH_TOGGLE_SELECTOR = (
     'div[data-test-id="searchAsAToolTooltip"] mat-slide-toggle button'
 )
 
-# --- 页面元素选择器 ---
-# 模型名称显示元素
+SCROLL_CONTAINER_SELECTOR = "ms-autoscroll-container"
+CHAT_SESSION_CONTENT_SELECTOR = ".chat-session-content"
+LAST_CHAT_TURN_SELECTOR = "ms-chat-turn:last-of-type"
+
 MODEL_NAME_SELECTOR = '[data-test-id="model-name"]'
-# CDK Overlay 容器（用于菜单、对话框等）
 CDK_OVERLAY_CONTAINER_SELECTOR = "div.cdk-overlay-container"
-# 聊天轮次容器
 CHAT_TURN_SELECTOR = "ms-chat-turn"
 
-# --- 思考模式回退选择器 ---
-# 这些选择器用于 thinking.py 中的回退逻辑
-# 主思考开关父容器（新版UI）
 THINKING_MODE_TOGGLE_PARENT_SELECTOR = (
     'mat-slide-toggle:has(button[aria-label="Toggle thinking mode"])'
 )
-# 主思考开关旧版根元素
 THINKING_MODE_TOGGLE_OLD_ROOT_SELECTOR = (
     'mat-slide-toggle[data-test-toggle="enable-thinking"]'
 )
-# 思考预算开关父容器（新版UI）
 THINKING_BUDGET_TOGGLE_PARENT_SELECTOR = 'mat-slide-toggle:has(button[aria-label="Toggle thinking budget between auto and manual"])'
-# 思考预算开关旧版根元素
 THINKING_BUDGET_TOGGLE_OLD_ROOT_SELECTOR = (
     'mat-slide-toggle[data-test-toggle="manual-budget"]'
+)
+
+# --- Function Call Response Selectors ---
+# Selectors for detecting and parsing function call widgets in AI Studio responses.
+# These are displayed when the model wants to call a function.
+
+# Native Function Call Response Selectors (AI Studio's built-in function calling UI)
+# These are used when native function calling is enabled and the model returns tool calls.
+
+# Native function call chunk container (primary selector for native FC responses)
+NATIVE_FUNCTION_CALL_CHUNK_SELECTOR = (
+    "ms-function-call-chunk, ms-prompt-chunk:has(ms-function-call-chunk)"
+)
+
+# Native function call code block (contains function name and args)
+NATIVE_FUNCTION_CALL_CODE_BLOCK_SELECTOR = (
+    'ms-function-call-chunk ms-code-block[icon="function"], '
+    "ms-function-call-chunk ms-code-block"
+)
+
+# Native function call name selector (in the expansion panel header)
+NATIVE_FUNCTION_CALL_NAME_SELECTOR = (
+    "ms-function-call-chunk ms-code-block mat-panel-title span:not(.material-symbols-outlined), "
+    "ms-function-call-chunk ms-code-block .mat-expansion-panel-header-title span:nth-child(2)"
+)
+
+# Native function call arguments selector (JSON in pre > code block)
+NATIVE_FUNCTION_CALL_ARGS_SELECTOR = (
+    "ms-function-call-chunk ms-code-block pre code, "
+    "ms-function-call-chunk ms-code-block .mat-expansion-panel-body pre code, "
+    "ms-function-call-chunk pre code"
+)
+
+# Function call widget container (wraps the entire function call block) - legacy/fallback
+FUNCTION_CALL_WIDGET_SELECTOR = (
+    "ms-function-call-chunk, "
+    "ms-function-call, "
+    "[data-test-id='function-call'], "
+    "[data-testid='function-call'], "
+    ".function-call-widget, "
+    ".function-call-container, "
+    "ms-chat-turn .function-call"
+)
+
+# Function call header containing the function name
+FUNCTION_CALL_NAME_SELECTOR = (
+    "ms-function-call-chunk ms-code-block mat-panel-title span:not(.material-symbols-outlined), "
+    "ms-function-call .function-name, "
+    "[data-test-id='function-call'] .function-name, "
+    ".function-call-widget .function-name, "
+    ".function-call-name, "
+    "ms-function-call [data-testid='function-name'], "
+    "[data-test-id='function-call-name']"
+)
+
+# Function call arguments/parameters container (usually JSON or formatted view)
+FUNCTION_CALL_ARGS_SELECTOR = (
+    "ms-function-call-chunk ms-code-block pre code, "
+    "ms-function-call .function-args, "
+    "ms-function-call .function-arguments, "
+    "ms-function-call pre, "
+    "ms-function-call code, "
+    "[data-test-id='function-call'] .arguments, "
+    "[data-test-id='function-call'] pre, "
+    "[data-test-id='function-call'] code, "
+    ".function-call-widget .arguments, "
+    ".function-call-arguments, "
+    "[data-testid='function-arguments']"
+)
+
+# Code block containing function call JSON (alternative to structured widget)
+FUNCTION_CALL_CODE_BLOCK_SELECTOR = (
+    "ms-function-call-chunk ms-code-block, "
+    "ms-chat-turn pre:has(code.language-json), "
+    "ms-chat-turn pre:has(code.language-tool_code), "
+    "ms-chat-turn .code-block:has-text('function_call'), "
+    "ms-chat-turn .code-block:has-text('tool_call')"
+)
+
+# --- Function Calling Selectors ---
+# Container for the function calling toggle and edit button
+FUNCTION_CALLING_CONTAINER_SELECTOR = '[data-test-id="functionCallingTooltip"]'
+
+# Toggle switch to enable/disable function calling
+FUNCTION_CALLING_TOGGLE_SELECTOR = (
+    '[data-test-id="functionCallingTooltip"] mat-slide-toggle button[role="switch"].mdc-switch, '
+    '[data-test-id="functionCallingTooltip"] .function-calling-toggle button[role="switch"], '
+    '[data-test-id="functionCallingTooltip"] button.mdc-switch'
+)
+
+# Button to open the function declarations editor modal
+FUNCTION_DECLARATIONS_EDIT_BUTTON_SELECTOR = (
+    '[data-test-id="functionCallingTooltip"] .edit-function-declarations-button, '
+    'button.edit-function-declarations-button[aria-label="Edit function declarations"], '
+    "button.edit-function-declarations-button"
+)
+
+# Function declarations modal dialog container
+FUNCTION_DECLARATIONS_DIALOG_SELECTOR = (
+    'mat-dialog-container:has(h2:has-text("Function declarations")), '
+    'mat-mdc-dialog-container:has(h2:has-text("Function declarations")), '
+    ".mat-mdc-dialog-container"
+)
+
+# Code Editor tab in the function declarations modal
+FUNCTION_DECLARATIONS_CODE_EDITOR_TAB_SELECTOR = (
+    'mat-dialog-container ms-tab-group button[role="tab"]:has-text("Code Editor"), '
+    'mat-mdc-dialog-container ms-tab-group button[role="tab"]:has-text("Code Editor")'
+)
+
+# Visual Editor tab in the function declarations modal
+FUNCTION_DECLARATIONS_VISUAL_EDITOR_TAB_SELECTOR = (
+    'mat-dialog-container ms-tab-group button[role="tab"]:has-text("Visual Editor"), '
+    'mat-mdc-dialog-container ms-tab-group button[role="tab"]:has-text("Visual Editor")'
+)
+
+# Textarea for entering function declarations JSON in Code Editor mode
+FUNCTION_DECLARATIONS_TEXTAREA_SELECTOR = (
+    "mat-dialog-container ms-text-editor textarea, "
+    "mat-mdc-dialog-container ms-text-editor textarea, "
+    'mat-dialog-container textarea[placeholder*="Tab"], '
+    'mat-mdc-dialog-container textarea[placeholder*="Tab"]'
+)
+
+# Save button in the function declarations modal
+FUNCTION_DECLARATIONS_SAVE_BUTTON_SELECTOR = (
+    'mat-dialog-container button[aria-label="Save the current function declarations"], '
+    'mat-mdc-dialog-container button[aria-label="Save the current function declarations"], '
+    'mat-dialog-container button:has-text("Save"), '
+    'mat-mdc-dialog-container button:has-text("Save")'
+)
+
+# Reset button in the function declarations modal
+FUNCTION_DECLARATIONS_RESET_BUTTON_SELECTOR = (
+    'mat-dialog-container button[aria-label="Reset the function declarations"], '
+    'mat-mdc-dialog-container button[aria-label="Reset the function declarations"], '
+    'mat-dialog-container button:has-text("Reset"), '
+    'mat-mdc-dialog-container button:has-text("Reset")'
+)
+
+# Close/Cancel button in the function declarations modal (typically an X or Cancel button)
+FUNCTION_DECLARATIONS_CLOSE_BUTTON_SELECTOR = (
+    'mat-dialog-container button[aria-label="Close"], '
+    'mat-mdc-dialog-container button[aria-label="Close"], '
+    "mat-dialog-container button.close-button, "
+    "mat-mdc-dialog-container button.close-button, "
+    'mat-dialog-container button:has-text("Cancel"), '
+    'mat-mdc-dialog-container button:has-text("Cancel")'
 )

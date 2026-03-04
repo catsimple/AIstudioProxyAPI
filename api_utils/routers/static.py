@@ -1,16 +1,15 @@
 """
-静态文件服务路由
-使用 FastAPI/Starlette 原生静态文件服务
+Static files serving routes
+Uses FastAPI/Starlette native static files service
 
-优化点:
-- 使用 StaticFiles 提供高性能的静态文件服务
-- 自动处理缓存头、字节范围请求、目录遍历防护
-- SPA 路由使用 catch-all 仅返回 index.html
+Optimization points:
+- Use StaticFiles for high-performance static file serving
+- Automatic handling of cache headers, byte-range requests, directory traversal protection
+- SPA routing uses catch-all to return only index.html
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -25,14 +24,14 @@ _REACT_DIST = _BASE_DIR / "static" / "frontend" / "dist"
 _REACT_ASSETS = _REACT_DIST / "assets"
 
 
-def get_static_files_app() -> Optional[StaticFiles]:
+def get_static_files_app() -> StaticFiles | None:
     """
     Create a StaticFiles app for the assets directory.
 
     Returns None if the directory doesn't exist (frontend not built).
     """
     if _REACT_ASSETS.exists():
-        return StaticFiles(directory=str(_REACT_ASSETS), check_dir=False)
+        return StaticFiles(directory=str(_REACT_ASSETS))
     return None
 
 

@@ -19,7 +19,7 @@ def setup_debug_listeners(page: AsyncPage) -> None:
     """
     from datetime import datetime, timezone
 
-    import server
+    from api_utils.server_state import state
 
     def handle_console(msg):
         """Handle console messages from the browser."""
@@ -32,7 +32,7 @@ def setup_debug_listeners(page: AsyncPage) -> None:
                 if url or line:
                     location_str = f"{url}:{line}"
 
-            server.console_logs.append(
+            state.console_logs.append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "type": msg.type,
@@ -43,6 +43,15 @@ def setup_debug_listeners(page: AsyncPage) -> None:
 
             # Log errors to our logger as well
             if msg.type == "error":
+                # Filter out known benign browser warnings - log at DEBUG level
+                text_lower = msg.text.lower()
+                if "cookie" in text_lower and "rejected" in text_lower:
+                    # Known Google cookie warning (SIDCC, etc.) - benign but may indicate stale auth profile
+                    # Log at DEBUG to reduce noise but preserve for troubleshooting
+                    logger.debug(
+                        f"[Browser Cookie Warning] {msg.text} - This may indicate the auth profile needs refresh"
+                    )
+                    return
                 logger.warning(f"[Browser Console Error] {msg.text}")
 
         except Exception as e:
@@ -59,7 +68,7 @@ def setup_debug_listeners(page: AsyncPage) -> None:
             ):
                 return  # Skip static assets
 
-            server.network_log["requests"].append(
+            state.network_log["requests"].append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "url": request.url,
@@ -81,7 +90,7 @@ def setup_debug_listeners(page: AsyncPage) -> None:
             ):
                 return  # Skip static assets
 
-            server.network_log["responses"].append(
+            state.network_log["responses"].append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "url": response.url,

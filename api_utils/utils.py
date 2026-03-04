@@ -1,10 +1,9 @@
 """
-API工具函数模块
-包含SSE生成、流处理、token统计和请求验证等工具函数
-（Refactored: logic moved to api_utils.utils_ext submodules）
+API utility function module
+Contains utility functions for SSE generation, stream processing, token statistics, and request validation
+(Refactored: logic moved to api_utils.utils_ext submodules)
 """
 
-from typing import Dict
 
 from .sse import generate_sse_stop_chunk
 from .utils_ext import (
@@ -29,10 +28,8 @@ _extract_json_from_text = extract_json_from_text
 _get_latest_user_text = get_latest_user_text
 
 
-def generate_sse_stop_chunk_with_usage(
-    req_id: str, model: str, usage_stats: Dict[str, int], reason: str = "stop"
-) -> str:
-    """生成带usage统计的SSE停止块"""
+def generate_sse_stop_chunk_with_usage(req_id: str, model: str, usage_stats: dict, reason: str = "stop") -> str:
+    """Generate SSE stop chunk with usage statistics"""
     return generate_sse_stop_chunk(req_id, model, reason, usage_stats)
 
 

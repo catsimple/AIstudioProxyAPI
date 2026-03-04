@@ -1,5 +1,5 @@
 # --- browser_utils/__init__.py ---
-# 浏览器操作工具模块
+# Browser operation utility module
 from .debug_utils import (
     capture_dom_structure,
     capture_playwright_state,
@@ -27,6 +27,7 @@ from .operations import (
     _get_final_response_content,
     _handle_model_list_response,
     _wait_for_response_completion,
+    check_quota_limit,
     detect_and_extract_page_error,
     get_raw_text_content,
     get_response_via_copy_button,
@@ -36,12 +37,12 @@ from .operations import (
 from .page_controller import PageController
 
 __all__ = [
-    # 初始化相关
+    # Initialization
     "_initialize_page_logic",
     "_close_page_logic",
     "signal_camoufox_shutdown",
     "enable_temporary_chat_mode",
-    # 页面操作相关
+    # Page operations
     "_handle_model_list_response",
     "detect_and_extract_page_error",
     "save_error_snapshot",
@@ -50,7 +51,8 @@ __all__ = [
     "_wait_for_response_completion",
     "_get_final_response_content",
     "get_raw_text_content",
-    # 模型管理相关
+    "check_quota_limit",
+    # Model management
     "switch_ai_studio_model",
     "load_excluded_models",
     "_handle_initial_model_state_and_storage",

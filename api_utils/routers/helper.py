@@ -39,7 +39,7 @@ def _load_config() -> HelperConfig:
             data = json.loads(_HELPER_CONFIG_FILE.read_text(encoding="utf-8"))
             return HelperConfig(**data)
         except Exception as e:
-            logger.warning(f"[Helper] 加载配置失败: {e}")
+            logger.warning(f"[Helper] Failed to load config: {e}")
     return HelperConfig()
 
 
@@ -52,28 +52,28 @@ def _save_config(config: HelperConfig) -> None:
             encoding="utf-8",
         )
     except Exception as e:
-        logger.error(f"[Helper] 保存配置失败: {e}")
+        logger.error(f"[Helper] Failed to save config: {e}")
 
 
 @router.get("/config")
 async def get_helper_config() -> JSONResponse:
-    """获取 Helper 配置。"""
+    """Get Helper configuration."""
     config = _load_config()
     return JSONResponse(content=config.model_dump())
 
 
 @router.post("/config")
 async def update_helper_config(config: HelperConfig) -> JSONResponse:
-    """更新 Helper 配置。"""
+    """Update Helper configuration."""
     _save_config(config)
     logger.info(
-        f"[Helper] 配置已更新: enabled={config.enabled}, endpoint={config.endpoint}"
+        f"[Helper] Config updated: enabled={config.enabled}, endpoint={config.endpoint}"
     )
 
     return JSONResponse(
         content={
             "success": True,
-            "message": "Helper 配置已保存",
+            "message": "Helper configuration saved",
             "config": config.model_dump(),
         }
     )

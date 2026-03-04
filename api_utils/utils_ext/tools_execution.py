@@ -15,19 +15,20 @@ async def maybe_execute_tools(
     tool_choice: Optional[Union[str, Dict[str, Any]]],
 ) -> Optional[List[Dict[str, Any]]]:
     """
-    基于 tools/tool_choice 的主动函数执行：
-    - 若 tool_choice 指明函数名（字符串或 {type:'function', function:{name}}），则尝试执行该函数；
-    - 若 tool_choice 为 'auto' 且仅提供一个工具，则执行该工具；
-    - 参数来源：从最近一条用户消息的文本中尝试提取 JSON；若失败则使用空参数。
-    - 返回 [{name, arguments, result}]；如无可执行则返回 None。
+    Active function execution based on tools/tool_choice:
+    - If tool_choice specifies a function name (string or {type:'function', function:{name}}), attempt to execute that function.
+    - If tool_choice is 'auto' and only one tool is provided, execute that tool.
+    - Argument source: Attempt to extract JSON from the text of the most recent user message; if fails, use empty parameters.
+    - Returns [{name, arguments, result}]; returns None if no executable is found.
     """
     try:
-        # Track runtime-declared tools和可选 MCP 端点
+        # Track runtime-declared tools and optional MCP endpoints
         mcp_ep: Optional[str] = None
         # support per-request MCP endpoint via request-level message or tool spec extension (if present later)
         # current: read from env only in registry when not provided
         register_runtime_tools(tools, mcp_ep)
-        # 若已有工具结果消息（role='tool'），遵循对话式调用循环，由客户端驱动，服务器不主动再次执行
+        # If tool result messages already exist (role='tool'), follow the conversational calling loop,
+        # driven by the client, the server does not actively execute again.
         for m in messages:
             if getattr(m, "role", None) == "tool":
                 return None
@@ -57,7 +58,7 @@ async def maybe_execute_tools(
             else:
                 chosen_name = tool_choice
         elif tool_choice is None:
-            # 不主动执行
+            # Do not execute actively
             return None
 
         if not chosen_name:

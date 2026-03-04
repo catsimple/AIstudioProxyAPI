@@ -1,25 +1,31 @@
 """
-思考模式参数归一化模块
-将 reasoning_effort 参数归一化为标准化的思考指令
+Thinking Mode Parameter Normalization Module
+Normalizes the reasoning_effort parameter into a standardized thinking directive.
 
-本模块负责将各种格式的 reasoning_effort 参数转换为统一的内部指令结构。
+This module is responsible for converting various formats of the reasoning_effort parameter into a unified internal directive structure.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 from config import DEFAULT_THINKING_BUDGET, ENABLE_THINKING_BUDGET
+from config.settings import (
+    DISABLE_THINKING_BUDGET_ON_STREAMING_DISABLE,
+    THINKING_BUDGET_HIGH,
+    THINKING_BUDGET_LOW,
+    THINKING_BUDGET_MEDIUM,
+)
 
 
 @dataclass
 class ThinkingDirective:
-    """标准化的思考指令
+    """Standardized thinking directive
 
-    属性:
-        thinking_enabled: 是否启用思考模式（总开关）
-        budget_enabled: 是否限制思考预算
-        budget_value: 预算token数量（仅当budget_enabled=True时有效）
-        original_value: 原始的reasoning_effort值（用于日志）
+    Attributes:
+        thinking_enabled: Whether thinking mode is enabled (master switch)
+        budget_enabled: Whether to limit thinking budget
+        budget_value: Budget token count (valid only when budget_enabled=True)
+        original_value: Original reasoning_effort value (for logging)
     """
 
     thinking_enabled: bool
@@ -29,22 +35,23 @@ class ThinkingDirective:
 
 
 def normalize_reasoning_effort(
-    reasoning_effort: Optional[Union[int, str]],
+    reasoning_effort: Optional[Any], is_streaming: bool = True
 ) -> ThinkingDirective:
-    """将 reasoning_effort 参数归一化为标准化的思考指令
+    """Normalize reasoning_effort parameter into a standardized thinking directive
 
-    参数:
-        reasoning_effort: API请求中的reasoning_effort参数，可能的取值：
-            - None: 使用默认配置
-            - 0 或 "0": 关闭思考模式
-            - 正整数: 开启思考，设置具体预算值
-            - "low"/"medium"/"high": 开启思考，使用预设预算
-            - "none"或"-1"或-1: 开启思考，不限制预算
+    Args:
+        reasoning_effort: reasoning_effort parameter in API request, possible values:
+            - None: Use default configuration
+            - 0 or "0": Disable thinking mode
+            - Positive integer: Enable thinking, set specific budget value
+            - "low"/"medium"/"high": Enable thinking, use preset budget
+            - "none" or "-1" or -1: Enable thinking, unlimited budget
+        is_streaming: Whether it is a streaming request (affects DISABLE_THINKING_BUDGET_ON_STREAMING_DISABLE config)
 
-    返回:
-        ThinkingDirective: 标准化的思考指令
+    Returns:
+        ThinkingDirective: Standardized thinking directive
 
-    示例:
+    Example:
         >>> normalize_reasoning_effort(None)
         ThinkingDirective(thinking_enabled=False, budget_enabled=False, budget_value=None, ...)
 
@@ -58,7 +65,7 @@ def normalize_reasoning_effort(
         ThinkingDirective(thinking_enabled=True, budget_enabled=False, budget_value=None, ...)
     """
 
-    # 场景1: 用户未指定，使用默认配置
+    # Scenario 1: User unspecified, use default configuration
     if reasoning_effort is None:
         return ThinkingDirective(
             thinking_enabled=ENABLE_THINKING_BUDGET,
@@ -67,7 +74,7 @@ def normalize_reasoning_effort(
             original_value=None,
         )
 
-    # 场景2: 关闭思考模式 (reasoning_effort = 0 或 "0")
+    # Scenario 2: Disable thinking mode (reasoning_effort = 0 or "0")
     if reasoning_effort == 0 or (
         isinstance(reasoning_effort, str) and reasoning_effort.strip() == "0"
     ):
@@ -78,10 +85,10 @@ def normalize_reasoning_effort(
             original_value=reasoning_effort,
         )
 
-    # 场景3: 开启思考但不限制预算 (reasoning_effort = "none" / "-1" / -1)
+    # Scenario 3: Enable thinking but unlimited budget (reasoning_effort = "none" / "-1" / -1)
     if isinstance(reasoning_effort, str):
         reasoning_str = reasoning_effort.strip().lower()
-        # "none"/"-1" → 开启思考，不限预算
+        # "none"/"-1" → enable thinking, unlimited budget
         if reasoning_str in ["none", "-1"]:
             return ThinkingDirective(
                 thinking_enabled=True,
@@ -89,13 +96,13 @@ def normalize_reasoning_effort(
                 budget_value=None,
                 original_value=reasoning_effort,
             )
-        # "high"/"low"/"medium" → 开启思考，使用 _should_enable_from_raw 逻辑
-        # 注意：这些值由 _handle_thinking_budget 中的 _should_enable_from_raw 处理
-        # 这里需要返回 thinking_enabled=True 避免与 desired_enabled 冲突
+        # "high"/"low"/"medium" → enable thinking, use _should_enable_from_raw logic
+        # Note: these values are handled by _should_enable_from_raw in _handle_thinking_budget
+        # Returning thinking_enabled=True here to avoid conflict with desired_enabled
         if reasoning_str in ["high", "low", "medium"]:
             return ThinkingDirective(
                 thinking_enabled=True,
-                budget_enabled=False,  # 具体值由 _should_enable_from_raw 确定
+                budget_enabled=False,  # Actual value determined by _should_enable_from_raw
                 budget_value=None,
                 original_value=reasoning_effort,
             )
@@ -107,7 +114,7 @@ def normalize_reasoning_effort(
             original_value=reasoning_effort,
         )
 
-    # 场景4: 开启思考且限制预算 (具体数字或预设值)
+    # Scenario 4: Enable thinking and limit budget (specific number or preset value)
     budget_value = _parse_budget_value(reasoning_effort)
 
     if budget_value is not None and budget_value > 0:
@@ -118,7 +125,7 @@ def normalize_reasoning_effort(
             original_value=reasoning_effort,
         )
 
-    # 无效值：使用默认配置
+    # Invalid value: Use default configuration
     return ThinkingDirective(
         thinking_enabled=ENABLE_THINKING_BUDGET,
         budget_enabled=ENABLE_THINKING_BUDGET,
@@ -127,24 +134,65 @@ def normalize_reasoning_effort(
     )
 
 
-def _parse_budget_value(reasoning_effort: Any) -> Optional[int]:
-    """解析预算值
+def normalize_reasoning_effort_with_stream_check(
+    reasoning_effort: Optional[Any], is_streaming: bool = True
+) -> ThinkingDirective:
+    """Normalize thinking directive with stream check
 
-    参数:
-        reasoning_effort: reasoning_effort参数值
+    Decides whether to disable thinking budget in non-streaming mode based on DISABLE_THINKING_BUDGET_ON_STREAMING_DISABLE configuration.
 
-    返回:
-        int: 预算token数量，如果无法解析则返回None
+    Args:
+        reasoning_effort: reasoning_effort parameter from API request
+        is_streaming: Whether it is a streaming request
+
+    Returns:
+        ThinkingDirective: Standardized thinking directive
     """
-    # 如果是整数，直接返回
+    # First get the basic thinking directive
+    directive = normalize_reasoning_effort(reasoning_effort, is_streaming)
+
+    # If not streaming and configured to disable budget on streaming disable, then disable
+    if not is_streaming and DISABLE_THINKING_BUDGET_ON_STREAMING_DISABLE:
+        return ThinkingDirective(
+            thinking_enabled=False,
+            budget_enabled=False,
+            budget_value=None,
+            original_value=reasoning_effort,
+        )
+
+    # Otherwise return original directive (allowing thinking budget to remain enabled in non-streaming mode)
+    return directive
+
+
+def _parse_budget_value(reasoning_effort: Any) -> Optional[int]:
+    """Parse budget value
+
+    Args:
+        reasoning_effort: reasoning_effort parameter value
+
+    Returns:
+        int: Budget token count, or None if parsing fails
+    """
+    # If integer, return directly
     if isinstance(reasoning_effort, int) and reasoning_effort > 0:
         return reasoning_effort
 
-    # 如果是字符串，尝试解析为数字
+    # If string, try to parse as number
     if isinstance(reasoning_effort, str):
         effort_str = reasoning_effort.strip().lower()
 
-        # 解析为数字
+        # Preset value mapping - use values from environment configuration
+        effort_map = {
+            "low": THINKING_BUDGET_LOW,
+            "medium": THINKING_BUDGET_MEDIUM,
+            "high": THINKING_BUDGET_HIGH,
+        }
+
+        # Try preset values first
+        if effort_str in effort_map:
+            return effort_map[effort_str]
+
+        # Then try parsing as number
         try:
             value = int(effort_str)
             if value > 0:
@@ -156,17 +204,19 @@ def _parse_budget_value(reasoning_effort: Any) -> Optional[int]:
 
 
 def format_directive_log(directive: ThinkingDirective) -> str:
-    """格式化思考指令为日志字符串
+    """Format thinking directive as log string
 
-    参数:
-        directive: 思考指令
+    Args:
+        directive: Thinking directive
 
-    返回:
-        str: 格式化的日志字符串
+    Returns:
+        str: Formatted log string
     """
     if not directive.thinking_enabled:
-        return f"关闭思考模式 (原始值: {directive.original_value})"
+        return f"Thinking mode disabled (Original: {directive.original_value})"
     elif directive.budget_enabled and directive.budget_value is not None:
-        return f"开启思考并限制预算: {directive.budget_value} tokens (原始值: {directive.original_value})"
+        return f"Thinking enabled with budget: {directive.budget_value} tokens (Original: {directive.original_value})"
     else:
-        return f"开启思考，不限制预算 (原始值: {directive.original_value})"
+        return (
+            f"Thinking enabled, unlimited budget (Original: {directive.original_value})"
+        )

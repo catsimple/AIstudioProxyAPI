@@ -29,7 +29,7 @@ class AuthFileInfo(BaseModel):
 class ActivateRequest(BaseModel):
     """Request to activate an auth file."""
 
-    filename: str = Field(..., description="要激活的认证文件名")
+    filename: str = Field(..., description="The name of the auth file to activate")
 
 
 class AuthFilesResponse(BaseModel):
@@ -77,13 +77,13 @@ def _list_saved_files() -> list[AuthFileInfo]:
 
 @router.get("/files")
 async def list_auth_files() -> JSONResponse:
-    """列出所有保存的认证文件。"""
+    """List all saved auth files."""
     _ensure_dirs()
     files = _list_saved_files()
     active = _get_active_file()
     return JSONResponse(
         content=AuthFilesResponse(
-            saved_files=[f.model_dump() for f in files],  # type: ignore[misc]
+            saved_files=files,  # type: ignore[arg-type]
             active_file=active,
         ).model_dump()
     )
@@ -91,7 +91,7 @@ async def list_auth_files() -> JSONResponse:
 
 @router.get("/active")
 async def get_active_auth() -> JSONResponse:
-    """获取当前激活的认证文件。"""
+    """Get the currently active auth file."""
     _ensure_dirs()
     active = _get_active_file()
     return JSONResponse(content={"active_file": active})
@@ -99,7 +99,7 @@ async def get_active_auth() -> JSONResponse:
 
 @router.post("/activate")
 async def activate_auth_file(request: ActivateRequest) -> JSONResponse:
-    """激活指定的认证文件。"""
+    """Activate the specified auth file."""
     _ensure_dirs()
     filename = request.filename
 
@@ -112,7 +112,7 @@ async def activate_auth_file(request: ActivateRequest) -> JSONResponse:
             break
 
     if not source_path:
-        raise HTTPException(status_code=404, detail=f"认证文件 '{filename}' 未找到")
+        raise HTTPException(status_code=404, detail=f"Auth file '{filename}' not found")
 
     # Clear existing active files
     active_dir = Path(ACTIVE_AUTH_DIR)
@@ -126,7 +126,7 @@ async def activate_auth_file(request: ActivateRequest) -> JSONResponse:
     return JSONResponse(
         content={
             "success": True,
-            "message": f"认证文件 '{filename}' 已激活",
+            "message": f"Auth file '{filename}' activated",
             "active_file": filename,
         }
     )
@@ -134,7 +134,7 @@ async def activate_auth_file(request: ActivateRequest) -> JSONResponse:
 
 @router.delete("/deactivate")
 async def deactivate_auth() -> JSONResponse:
-    """移除当前激活的认证。"""
+    """Remove the currently active auth."""
     _ensure_dirs()
     active_dir = Path(ACTIVE_AUTH_DIR)
     removed_count = 0
@@ -146,7 +146,7 @@ async def deactivate_auth() -> JSONResponse:
     return JSONResponse(
         content={
             "success": True,
-            "message": f"已移除 {removed_count} 个认证文件",
+            "message": f"Removed {removed_count} auth file(s)",
             "active_file": None,
         }
     )

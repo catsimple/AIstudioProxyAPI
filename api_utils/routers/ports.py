@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import subprocess
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -33,7 +34,7 @@ class PortConfig(BaseModel):
     @classmethod
     def validate_required_port(cls, v: int) -> int:
         if v < 1024:
-            raise ValueError("端口必须 >= 1024")
+            raise ValueError("Port must be >= 1024")
         return v
 
 
@@ -56,8 +57,8 @@ class PortStatus(BaseModel):
 class KillRequest(BaseModel):
     """Request to kill a process."""
 
-    pid: int = Field(..., ge=1, description="要终止的进程PID")
-    confirm: bool = Field(default=False, description="确认终止")
+    pid: int = Field(..., ge=1, description="PID of the process to terminate")
+    confirm: bool = Field(default=False, description="Confirm termination")
 
 
 def _load_port_config() -> PortConfig:
@@ -200,8 +201,6 @@ def _kill_process(pid: int) -> tuple[bool, str]:
         if system in ("Linux", "Darwin"):
             # Try SIGTERM first
             subprocess.run(["kill", "-TERM", str(pid)], capture_output=True, timeout=3)
-            import time
-
             time.sleep(0.5)
 
             # Check if still alive
@@ -209,7 +208,7 @@ def _kill_process(pid: int) -> tuple[bool, str]:
                 ["kill", "-0", str(pid)], capture_output=True, text=True
             )
             if check.returncode != 0:
-                return True, f"进程 {pid} 已终止 (SIGTERM)"
+                return True, f"Process {pid} terminated (SIGTERM)"
 
             # Force kill
             subprocess.run(["kill", "-KILL", str(pid)], capture_output=True, timeout=3)
@@ -220,9 +219,9 @@ def _kill_process(pid: int) -> tuple[bool, str]:
                 ["kill", "-0", str(pid)], capture_output=True, text=True
             )
             if check.returncode != 0:
-                return True, f"进程 {pid} 已强制终止 (SIGKILL)"
+                return True, f"Process {pid} force terminated (SIGKILL)"
             else:
-                return False, f"无法终止进程 {pid}"
+                return False, f"Unable to terminate process {pid}"
 
         elif system == "Windows":
             result = subprocess.run(
@@ -233,19 +232,19 @@ def _kill_process(pid: int) -> tuple[bool, str]:
                 creationflags=subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined]
             )
             if result.returncode == 0:
-                return True, f"进程 {pid} 已终止"
+                return True, f"Process {pid} terminated"
             else:
-                return False, f"无法终止进程 {pid}: {result.stderr}"
+                return False, f"Unable to terminate process {pid}: {result.stderr}"
 
     except Exception as e:
-        return False, f"终止进程时出错: {e}"
+        return False, f"Error terminating process: {e}"
 
-    return False, "不支持的操作系统"
+    return False, "Unsupported OS"
 
 
 @router.get("/config")
 async def get_port_config() -> JSONResponse:
-    """获取端口配置。"""
+    """Get port configuration."""
     config = _load_port_config()
     return JSONResponse(content=config.model_dump())
 
@@ -253,23 +252,23 @@ async def get_port_config() -> JSONResponse:
 @router.post("/config")
 async def update_port_config(config: PortConfig) -> JSONResponse:
     """
-    更新端口配置。
+    Update port configuration.
 
-    注意：更改将在下次重启服务时生效。
+    Note: Changes will take effect on next server restart.
     """
     _save_port_config(config)
     return JSONResponse(
         content={
             "success": True,
             "config": config.model_dump(),
-            "message": "配置已保存。更改将在下次重启服务时生效。",
+            "message": "Configuration saved. Changes will take effect on next restart.",
         }
     )
 
 
 @router.get("/status")
 async def get_port_status() -> JSONResponse:
-    """获取端口占用状态。"""
+    """Get port occupation status."""
     config = _load_port_config()
 
     statuses: list[PortStatus] = []
@@ -314,23 +313,16 @@ async def get_port_status() -> JSONResponse:
 @router.post("/kill")
 async def kill_process(request: KillRequest) -> JSONResponse:
     """
-    终止指定PID的进程。
+    Terminate process with specified PID.
 
-    安全性验证：
-    - 需要 confirm=true 确认操作
-    - PID必须属于配置的端口上的进程
-
-    Args:
-        request: 包含 PID 和确认标志的请求
-
-    Raises:
-        HTTPException 400: 未确认操作
-        HTTPException 403: PID不属于跟踪的端口
+    Security validation:
+    - Requires confirm=true
+    - PID must belong to a process on a configured port
     """
     if not request.confirm:
         raise HTTPException(
             status_code=400,
-            detail="请设置 confirm=true 确认终止进程",
+            detail="Please set confirm=true to confirm process termination",
         )
 
     # Security: Validate PID belongs to a tracked port
@@ -350,7 +342,7 @@ async def kill_process(request: KillRequest) -> JSONResponse:
     if request.pid not in tracked_pids:
         raise HTTPException(
             status_code=403,
-            detail=f"安全验证失败：PID {request.pid} 不属于配置的端口。只能终止在 FastAPI ({config.fastapi_port})、Camoufox ({config.camoufox_debug_port}) 或 Stream Proxy ({config.stream_proxy_port}) 端口上运行的进程。",
+            detail=f"Security validation failed: PID {request.pid} does not belong to a configured port. Only processes running on FastAPI ({config.fastapi_port}), Camoufox ({config.camoufox_debug_port}) or Stream Proxy ({config.stream_proxy_port}) ports can be terminated.",
         )
 
     success, message = _kill_process(request.pid)

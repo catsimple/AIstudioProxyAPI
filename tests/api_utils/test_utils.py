@@ -67,8 +67,8 @@ def test_prepare_combined_prompt_basic(mock_logger):
     ]
     prompt, files = prepare_combined_prompt(messages, "req1")
 
-    assert "用户:\nHello" in prompt
-    assert "助手:\nHi there" in prompt
+    assert "User:\nHello" in prompt
+    assert "Assistant:\nHi there" in prompt
     assert len(files) == 0
 
 
@@ -80,8 +80,8 @@ def test_prepare_combined_prompt_system(mock_logger):
     ]
     prompt, files = prepare_combined_prompt(messages, "req1")
 
-    assert "系统指令:\nBe helpful" in prompt
-    assert "用户:\nHi" in prompt
+    assert "System Instructions:\nBe helpful" in prompt
+    assert "User:\nHi" in prompt
     # System message should not be repeated in conversation history if processed
     assert prompt.count("Be helpful") == 1
 
@@ -104,9 +104,9 @@ def test_prepare_combined_prompt_tools(mock_logger):
         messages, "req1", tools=tools, tool_choice="auto"
     )
 
-    assert "可用工具目录:" in prompt
-    assert "- 函数: get_weather" in prompt
-    assert "参数模式:" in prompt
+    assert "Available Tools Catalog:" in prompt
+    assert "- Function: get_weather" in prompt
+    assert "Parameter Schema:" in prompt
 
 
 def test_prepare_combined_prompt_multimodal_image(mock_file_utils, mock_logger):
@@ -127,7 +127,7 @@ def test_prepare_combined_prompt_multimodal_image(mock_file_utils, mock_logger):
     prompt, files = prepare_combined_prompt(messages, "req1")
 
     assert "/tmp/image.png" in files
-    assert "[图像细节: detail=high]" in prompt
+    assert "[Image Details: detail=high]" in prompt
 
 
 def test_prepare_combined_prompt_multimodal_dict(mock_file_utils, mock_logger):
@@ -146,7 +146,7 @@ def test_prepare_combined_prompt_multimodal_dict(mock_file_utils, mock_logger):
 
     assert "Look at this" in prompt
     assert "/tmp/image.png" in files
-    assert "[图像细节: detail=low]" in prompt
+    assert "[Image Details: detail=low]" in prompt
 
 
 def test_prepare_combined_prompt_audio(mock_file_utils, mock_logger):
@@ -183,7 +183,7 @@ def test_prepare_combined_prompt_tool_calls(mock_logger):
 
     prompt, files = prepare_combined_prompt(messages, "req1")
 
-    assert "请求调用函数: get_weather" in prompt
+    assert "Request function call: get_weather" in prompt
     assert '"city": "Paris"' in prompt
 
 
@@ -193,7 +193,7 @@ def test_prepare_combined_prompt_tool_results(mock_logger):
 
     prompt, _ = prepare_combined_prompt(messages, "req1")
 
-    assert "工具结果 (tool_call_id=call1):" in prompt
+    assert "Tool result (tool_call_id=call1):" in prompt
     assert "Sunny" in prompt
 
 
@@ -251,10 +251,15 @@ async def test_maybe_execute_tools(mock_tools_registry, mock_logger):
     assert call_args[1] == '{"arg": 1}'  # It passes the extracted JSON string
 
 
-def test_collect_and_validate_attachments(mock_file_utils, mock_logger):
+def test_collect_and_validate_attachments(mock_file_utils, mock_logger, tmp_path):
     """Test attachment collection and validation."""
     mock_extract, _, mock_exists = mock_file_utils
     mock_exists.return_value = True
+
+    valid_initial = str(tmp_path / "initial.png")
+    valid_existing = str(tmp_path / "existing.png")
+    valid_msg_att = str(tmp_path / "msg_att.png")
+
     mock_extract.return_value = "/tmp/data.png"
 
     # Mock request object
@@ -265,20 +270,20 @@ def test_collect_and_validate_attachments(mock_file_utils, mock_logger):
             self.attachments = attachments or []
 
     class MockRequest:
-        attachments = ["/tmp/existing.png", {"url": "data:image/png..."}]
+        attachments = [valid_existing, {"url": "data:image/png..."}]
         messages = [
-            MockMessage(role="user", content="text", attachments=["/tmp/msg_att.png"])
+            MockMessage(role="user", content="text", attachments=[valid_msg_att])
         ]
 
     req = MockRequest()
-    initial_list = ["/tmp/initial.png"]
+    initial_list = [valid_initial]
 
     result = collect_and_validate_attachments(req, "req1", initial_list)
 
-    assert "/tmp/initial.png" in result
-    assert "/tmp/existing.png" in result
+    assert valid_initial in result
+    assert valid_existing in result
     assert "/tmp/data.png" in result
-    assert "/tmp/msg_att.png" in result
+    assert valid_msg_att in result
 
 
 def test_generate_sse_stop_chunk_with_usage():
@@ -343,9 +348,9 @@ def test_prepare_combined_prompt_system_message_ordering(mock_logger):
     # 1. Finds first system message ("System 1") and uses it.
     # 2. Skips subsequent system messages ("System 2").
 
-    assert "用户:\nUser 1" in prompt
-    assert "系统指令:\nSystem 1" in prompt
-    assert "助手:\nAssistant 1" in prompt
+    assert "User:\nUser 1" in prompt
+    assert "System Instructions:\nSystem 1" in prompt
+    assert "Assistant:\nAssistant 1" in prompt
 
     # System 2 should be skipped
     assert "System 2" not in prompt
@@ -355,9 +360,9 @@ def test_prepare_combined_prompt_system_message_ordering(mock_logger):
     # In utils.py, it is added to combined_parts BEFORE iterating other messages.
     # So "System 1" should appear before "User 1"
 
-    idx_s1 = prompt.find("系统指令:\nSystem 1")
-    idx_u1 = prompt.find("用户:\nUser 1")
-    idx_a1 = prompt.find("助手:\nAssistant 1")
+    idx_s1 = prompt.find("System Instructions:\nSystem 1")
+    idx_u1 = prompt.find("User:\nUser 1")
+    idx_a1 = prompt.find("Assistant:\nAssistant 1")
 
     assert idx_s1 < idx_u1
     assert idx_u1 < idx_a1
@@ -475,7 +480,7 @@ def test_prepare_combined_prompt_complex_nested_dict(
 
     content = {
         "text": "Look at these files",
-        "images": [{"url": f"file://{img_file}"}],  # Platform-appropriate file URL
+        "images": [{"url": img_file.as_uri()}],  # Platform-appropriate file URL
         "files": [{"path": str(doc_file)}],  # Platform-appropriate absolute path
         "media": [{"url": "data:video..."}],  # data url
     }
@@ -678,7 +683,7 @@ def test_prepare_combined_prompt_tool_choice_string(mock_logger):
         messages, "req1", tools=tools, tool_choice="my_tool"
     )
 
-    assert "建议优先使用函数: my_tool" in prompt
+    assert "Recommended function to use: my_tool" in prompt
 
 
 def test_prepare_combined_prompt_tool_choice_dict(mock_logger):
@@ -692,7 +697,7 @@ def test_prepare_combined_prompt_tool_choice_dict(mock_logger):
         messages, "req1", tools=tools, tool_choice=tool_choice
     )
 
-    assert "建议优先使用函数: my_tool" in prompt
+    assert "Recommended function to use: my_tool" in prompt
 
 
 def test_prepare_combined_prompt_tools_error(mock_logger):
@@ -709,7 +714,7 @@ def test_prepare_combined_prompt_tools_error(mock_logger):
     prompt, _ = prepare_combined_prompt(
         messages, "req1", tools=cast(List[Dict[str, Any]], tools)
     )
-    assert "用户:\nhi" in prompt
+    assert "User:\nhi" in prompt
 
 
 def test_prepare_combined_prompt_empty_content(mock_logger):
@@ -737,33 +742,43 @@ def test_prepare_combined_prompt_tool_result_list_exception(mock_logger):
     assert "tool_call_id=1" in prompt
 
 
-def test_collect_and_validate_attachments_top_level(mock_file_utils, mock_logger):
+def test_collect_and_validate_attachments_top_level(
+    mock_file_utils, mock_logger, tmp_path
+):
     """Test top level attachments in request."""
     mock_extract, _, mock_exists = mock_file_utils
     mock_exists.return_value = True
 
+    valid_top1 = str(tmp_path / "top1.png")
+    valid_top2 = tmp_path / "top2.png"
+
     class MockRequest:
-        attachments = ["/tmp/top1.png", {"url": "file:///c:/top2.png"}]
+        attachments = [valid_top1, {"url": valid_top2.as_uri()}]
         messages = []
 
     req = MockRequest()
     result = collect_and_validate_attachments(req, "req1", [])
 
-    assert "/tmp/top1.png" in result
+    assert valid_top1 in result
     assert any("top2.png" in f for f in result)
 
 
-def test_collect_and_validate_attachments_initial_filter(mock_file_utils, mock_logger):
+def test_collect_and_validate_attachments_initial_filter(
+    mock_file_utils, mock_logger, tmp_path
+):
     """Test filtering of initial image list."""
     _, _, mock_exists = mock_file_utils
 
+    exists_path = str(tmp_path / "exists.png")
+    missing_path = str(tmp_path / "missing.png")
+
     # mock_exists side effect to filter
     def side_effect(path):
-        return path == "/exists.png"
+        return str(path) == exists_path
 
     mock_exists.side_effect = side_effect
 
-    initial = ["/exists.png", "/missing.png", "relative.png"]
+    initial = [exists_path, missing_path, "relative.png"]
 
     # Need request object
     class MockRequest:
@@ -771,8 +786,8 @@ def test_collect_and_validate_attachments_initial_filter(mock_file_utils, mock_l
 
     result = collect_and_validate_attachments(MockRequest(), "req1", initial)
 
-    assert "/exists.png" in result
-    assert "/missing.png" not in result
+    assert exists_path in result
+    assert missing_path not in result
     assert "relative.png" not in result
 
 
@@ -784,7 +799,7 @@ def test_prepare_combined_prompt_tool_fallback_name(mock_logger):
 
     prompt, _ = prepare_combined_prompt(messages, "req1", tools=tools)
 
-    assert "- 函数: fallback_tool" in prompt
+    assert "- Function: fallback_tool" in prompt
 
 
 def test_prepare_combined_prompt_tool_params_unserializable(mock_logger):
@@ -809,8 +824,8 @@ def test_prepare_combined_prompt_tool_params_unserializable(mock_logger):
     prompt, _ = prepare_combined_prompt(messages, "req1", tools=tools)
 
     # Should contain function name but skip params
-    assert "- 函数: bad_params" in prompt
-    assert "参数模式:" not in prompt
+    assert "- Function: bad_params" in prompt
+    assert "Parameter Schema:" not in prompt
 
 
 def test_prepare_combined_prompt_empty_system_message(mock_logger):
@@ -821,8 +836,8 @@ def test_prepare_combined_prompt_empty_system_message(mock_logger):
     ]
     prompt, _ = prepare_combined_prompt(messages, "req1")
 
-    assert "系统指令:" not in prompt
-    assert "用户:\nHi" in prompt
+    assert "System Instructions:" not in prompt
+    assert "User:\nHi" in prompt
 
 
 def test_prepare_combined_prompt_item_type_exception(mock_logger):
@@ -939,7 +954,7 @@ def test_collect_and_validate_attachments_detailed(
             str(valid_top_level),
             str(missing),
             {"url": "data:image/png;base64,data1"},
-            {"url": f"file://{valid_file_url}"},
+            {"url": valid_file_url.as_uri()},
             "",  # Empty string
             None,  # None
             {"url": ""},  # Empty URL in dict
@@ -950,7 +965,7 @@ def test_collect_and_validate_attachments_detailed(
                 content="msg1",
                 images=[str(valid_image)],
                 files=[{"path": str(valid_file)}],
-                media=[f"file://{valid_media}"],
+                media=[valid_media.as_uri()],
             )
         ]
 
@@ -995,10 +1010,10 @@ def test_prepare_combined_prompt_tool_edge_cases(mock_logger):
 
     # Should handle malformed tool gracefully (skip or partial log)
     # "direct_name_tool" might be processed if logic allows (it does: t.get('name'))
-    assert "函数: direct_name_tool" in prompt
+    assert "Function: direct_name_tool" in prompt
 
     # tool_choice "non_existent_tool" might still be suggested if logic just appends it
-    assert "建议优先使用函数: non_existent_tool" in prompt
+    assert "Recommended function to use: non_existent_tool" in prompt
 
 
 def test_prepare_combined_prompt_content_pydantic_objects(mock_file_utils, mock_logger):
@@ -1069,7 +1084,7 @@ def test_prepare_combined_prompt_input_image_with_detail(mock_file_utils, mock_l
     prompt, files = prepare_combined_prompt(messages, "req1")
 
     assert "/tmp/input_image.png" in files
-    assert "[图像细节: detail=high]" in prompt
+    assert "[Image Details: detail=high]" in prompt
 
 
 def test_prepare_combined_prompt_dict_image_url_with_detail(
@@ -1092,7 +1107,7 @@ def test_prepare_combined_prompt_dict_image_url_with_detail(
     prompt, files = prepare_combined_prompt(messages, "req1")
 
     assert "/tmp/image_detail.png" in files
-    assert "[图像细节: detail=auto]" in prompt
+    assert "[Image Details: detail=auto]" in prompt
 
 
 def test_prepare_combined_prompt_audio_absolute_path(
@@ -1124,15 +1139,19 @@ def test_prepare_combined_prompt_audio_absolute_path(
     assert str(audio_file) in files
 
 
-def test_prepare_combined_prompt_video_absolute_path(mock_file_utils, mock_logger):
+def test_prepare_combined_prompt_video_absolute_path(
+    mock_file_utils, mock_logger, tmp_path
+):
     """Test video with absolute path (lines 427-431)."""
     _, _, mock_exists = mock_file_utils
     mock_exists.return_value = True
 
+    video_file = str(tmp_path / "video.mp4")
+
     # Absolute path for video
     content_item = {
         "type": "input_video",
-        "input_video": {"url": "/home/user/video.mp4"},
+        "input_video": {"url": video_file},
     }
 
     messages = [
@@ -1141,7 +1160,7 @@ def test_prepare_combined_prompt_video_absolute_path(mock_file_utils, mock_logge
 
     prompt, files = prepare_combined_prompt(messages, "req1")
 
-    assert "/home/user/video.mp4" in files
+    assert video_file in files
 
 
 def test_get_latest_user_text_dict_non_text_type(mock_logger):
@@ -1249,9 +1268,8 @@ def test_prepare_combined_prompt_tool_params_json_dumps_error(mock_logger):
     prompt, _ = prepare_combined_prompt(messages, "req1", tools=tools)
 
     # Tool name should still be present
-    assert "- 函数: bad_tool" in prompt
+    assert "- Function: bad_tool" in prompt
     # But params should be skipped due to exception
-    # The code has a try/except that passes on json.dumps failure
 
 
 def test_collect_and_validate_attachments_empty_url_handling(
@@ -1324,7 +1342,7 @@ def test_prepare_combined_prompt_dict_input_image_with_detail(
     prompt, files = prepare_combined_prompt(messages, "req1")
 
     assert "/tmp/input_img_detail.png" in files
-    assert "[图像细节: detail=low]" in prompt
+    assert "[Image Details: detail=low]" in prompt
 
 
 def test_prepare_combined_prompt_dict_content_file_field(
@@ -1355,15 +1373,19 @@ def test_prepare_combined_prompt_dict_content_file_field(
     assert str(file_path) in files
 
 
-def test_prepare_combined_prompt_dict_content_file_path(mock_file_utils, mock_logger):
+def test_prepare_combined_prompt_dict_content_file_path(
+    mock_file_utils, mock_logger, tmp_path
+):
     """Test dict content with file.path field (lines 318-322)."""
     _, _, mock_exists = mock_file_utils
     mock_exists.return_value = True
 
+    pdf_file = str(tmp_path / "file.pdf")
+
     content = [
         {
             "type": "file_url",
-            "file": {"path": "/absolute/path/file.pdf"},
+            "file": {"path": pdf_file},
         }
     ]
 
@@ -1371,7 +1393,7 @@ def test_prepare_combined_prompt_dict_content_file_path(mock_file_utils, mock_lo
 
     prompt, files = prepare_combined_prompt(messages, "req1")
 
-    assert "/absolute/path/file.pdf" in files
+    assert pdf_file in files
 
 
 def test_prepare_combined_prompt_object_url_attribute(
@@ -1499,12 +1521,12 @@ def test_prepare_combined_prompt_assistant_empty_with_tool_calls(mock_logger):
 
     prompt, _ = prepare_combined_prompt(messages, "req1")
 
-    assert "请求调用函数: func" in prompt
+    assert "Request function call: func" in prompt
 
     prompt, _ = prepare_combined_prompt(messages, "req1")
 
     # Should include tool call visualization even with empty content
-    assert "请求调用函数: func" in prompt
+    assert "Request function call: func" in prompt
 
 
 def test_prepare_combined_prompt_skip_empty_messages_edge_case(mock_logger):
