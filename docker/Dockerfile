@@ -88,7 +88,20 @@ RUN mkdir -p /var/cache/camoufox && \
     mkdir -p /app/.cache && \
     ln -s /var/cache/camoufox /app/.cache/camoufox
 
+# 1. 预先创建数据目录（以 root 身份）
+RUN mkdir -p /usr/local/lib/python3.10/site-packages/browserforge/headers/data && \
+    mkdir -p /usr/local/lib/python3.10/site-packages/browserforge/fingerprints/data
+
+# 2. 立即下载数据（此时有代理，能下载成功）
+RUN python3 -m browserforge.headers update && \
+    python3 -m browserforge.fingerprints update
+
+# 3. 运行你原本的脚本（如果有额外逻辑）
 RUN python scripts/update_browserforge_data.py
+
+# 4. 【最关键】把这些目录的控制权交给 appuser 用户
+RUN chown -R appuser:appgroup /usr/local/lib/python3.10/site-packages/browserforge/headers/data && \
+    chown -R appuser:appgroup /usr/local/lib/python3.10/site-packages/browserforge/fingerprints/data
 
 # 清理代理环境变量
 ENV HTTP_PROXY=""
