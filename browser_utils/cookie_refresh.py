@@ -33,6 +33,8 @@ _last_refresh_time: float = 0
 _request_count_since_refresh: int = 0
 _refresh_lock = asyncio.Lock()
 _periodic_task: Optional[asyncio.Task] = None
+_profile_retry_after: dict[str, float] = {}
+_PROFILE_RETRY_BACKOFF_SECONDS = 300
 
 
 async def save_current_cookies_to_profile() -> bool:
@@ -47,6 +49,8 @@ async def save_current_cookies_to_profile() -> bool:
     if not COOKIE_REFRESH_ENABLED:
         logger.debug("Cookie refresh is disabled, skipping save")
         return False
+
+    profile_path = ""
 
     try:
         from api_utils.server_state import state
@@ -63,6 +67,14 @@ async def save_current_cookies_to_profile() -> bool:
 
         if not profile_path or not os.path.exists(profile_path):
             logger.debug(f"No valid auth profile path found: {profile_path}")
+            return False
+
+        retry_after = _profile_retry_after.get(profile_path, 0)
+        if retry_after and time.time() < retry_after:
+            logger.debug(
+                "Skipping cookie save for '%s' during backoff window",
+                os.path.basename(profile_path),
+            )
             return False
 
         # Use lock to prevent concurrent saves
@@ -88,6 +100,7 @@ async def save_current_cookies_to_profile() -> bool:
                 json.dump(existing_data, f, indent=2, ensure_ascii=False)
 
             _last_refresh_time = time.time()
+            _profile_retry_after.pop(profile_path, None)
             cookie_count = len(storage_state.get("cookies", []))
             logger.info(
                 f"🍪 Cookies saved to '{os.path.basename(profile_path)}' "
@@ -97,6 +110,21 @@ async def save_current_cookies_to_profile() -> bool:
 
     except asyncio.CancelledError:
         raise
+    except PermissionError as e:
+        if profile_path:
+            _profile_retry_after[profile_path] = (
+                time.time() + _PROFILE_RETRY_BACKOFF_SECONDS
+            )
+            logger.error(
+                "Failed to save cookies to '%s' due to permission error. "
+                "Suppressing retries for %ss: %s",
+                os.path.basename(profile_path),
+                _PROFILE_RETRY_BACKOFF_SECONDS,
+                e,
+            )
+        else:
+            logger.error(f"Failed to save cookies: {e}")
+        return False
     except Exception as e:
         logger.error(f"Failed to save cookies: {e}")
         return False
