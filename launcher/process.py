@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+import re
 from typing import Optional
 
 from launcher.config import ENDPOINT_CAPTURE_TIMEOUT, PYTHON_EXECUTABLE, ws_regex
@@ -95,6 +96,7 @@ def build_launch_command(
 class CamoufoxProcessManager:
     def __init__(self):
         self.camoufox_proc = None
+        self.camoufox_browser_pid = None
         self.captured_ws_endpoint = None
 
     def start(
@@ -133,13 +135,6 @@ class CamoufoxProcessManager:
             self.camoufox_proc = subprocess.Popen(
                 camoufox_internal_cmd_args, **camoufox_popen_kwargs
             )
-            try:
-                from api_utils.server_state import state
-
-                state.camoufox_pid = self.camoufox_proc.pid
-                os.environ["CAMOUFOX_PID"] = str(self.camoufox_proc.pid)
-            except Exception as pid_err:
-                logger.debug(f"Failed to publish Camoufox PID: {pid_err}")
             logger.info(
                 f"Camoufox internal process started (PID: {self.camoufox_proc.pid}). Waiting for WebSocket endpoint output (max {ENDPOINT_CAPTURE_TIMEOUT} seconds)..."
             )
@@ -204,6 +199,28 @@ class CamoufoxProcessManager:
                         logger.info(f"(Camoufox) {log_content}")
                     else:
                         logger.debug(f"(Camoufox) {log_content}")
+
+                    if self.camoufox_browser_pid is None:
+                        pid_match = re.search(
+                            r"Camoufox internal process started \(PID:\s*(\d+)\)",
+                            log_content,
+                        )
+                        if pid_match:
+                            self.camoufox_browser_pid = int(pid_match.group(1))
+                            try:
+                                from api_utils.server_state import state
+
+                                state.camoufox_pid = self.camoufox_browser_pid
+                                os.environ["CAMOUFOX_PID"] = str(
+                                    self.camoufox_browser_pid
+                                )
+                            except Exception as pid_err:
+                                logger.debug(
+                                    f"Failed to publish browser PID: {pid_err}"
+                                )
+                            logger.info(
+                                f"[CPU] Captured Camoufox browser PID: {self.camoufox_browser_pid}"
+                            )
 
                     ws_match = ws_regex.search(line_from_camoufox)
                     if ws_match:
@@ -333,4 +350,5 @@ class CamoufoxProcessManager:
         except Exception:
             pass
         os.environ.pop("CAMOUFOX_PID", None)
+        self.camoufox_browser_pid = None
         logger.info("--- Cleanup procedure completed (CamoufoxProcessManager) ---")

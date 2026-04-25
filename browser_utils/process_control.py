@@ -93,7 +93,9 @@ def cancel_camoufox_freeze() -> None:
 
 async def _freeze_after_delay(delay_seconds: float) -> None:
     try:
+        logger.info(f"[CPU] Idle timer started; freezing in {delay_seconds:.0f}s if no activity.")
         await asyncio.sleep(delay_seconds)
+        logger.info("[CPU] Idle period elapsed; freezing Camoufox now.")
         freeze_camoufox_process()
     except asyncio.CancelledError:
         raise
