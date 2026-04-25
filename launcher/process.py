@@ -6,12 +6,70 @@ import subprocess
 import sys
 import threading
 import time
-import re
 from typing import Optional
 
 from launcher.config import ENDPOINT_CAPTURE_TIMEOUT, PYTHON_EXECUTABLE, ws_regex
 
 logger = logging.getLogger("CamoufoxLauncher")
+
+
+def _read_proc_cmdline(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            data = f.read().replace(b"\x00", b" ").decode("utf-8", errors="replace")
+            return data.strip()
+    except Exception:
+        return ""
+
+
+def _read_proc_children(pid: int) -> list[int]:
+    try:
+        with open(f"/proc/{pid}/task/{pid}/children", "r", encoding="utf-8") as f:
+            return [int(chunk) for chunk in f.read().split() if chunk.isdigit()]
+    except Exception:
+        return []
+
+
+def _find_camoufox_browser_pid(root_pid: int, timeout: float = 8.0) -> Optional[int]:
+    """Best-effort discovery of the real browser PID.
+
+    The launcher PID can be a Python wrapper. We therefore scan the process
+    table directly and prefer the non-contentproc camoufox/firefox binary.
+    """
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        candidates: list[tuple[int, str]] = []
+        try:
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                pid = int(entry)
+                cmdline = _read_proc_cmdline(pid).lower()
+                if not cmdline:
+                    continue
+                if "launch_camoufox.py" in cmdline:
+                    continue
+                if "camoufox-bin" in cmdline and "-contentproc" not in cmdline:
+                    candidates.append((pid, cmdline))
+                elif "firefox" in cmdline and "-contentproc" not in cmdline:
+                    candidates.append((pid, cmdline))
+        except Exception:
+            pass
+
+        if candidates:
+            # Prefer the most browser-like cmdline; lowest PID is usually the main browser.
+            candidates.sort(key=lambda item: item[0])
+            selected_pid, selected_cmdline = candidates[0]
+            logger.info(
+                f"[CPU] Browser PID candidates: {[pid for pid, _ in candidates[:5]]}"
+            )
+            logger.debug(f"[CPU] Selected browser PID cmdline: {selected_cmdline}")
+            return selected_pid
+
+        time.sleep(0.2)
+
+    return None
 
 
 def _enqueue_output(
@@ -200,28 +258,6 @@ class CamoufoxProcessManager:
                     else:
                         logger.debug(f"(Camoufox) {log_content}")
 
-                    if self.camoufox_browser_pid is None:
-                        pid_match = re.search(
-                            r"Camoufox internal process started \(PID:\s*(\d+)\)",
-                            log_content,
-                        )
-                        if pid_match:
-                            self.camoufox_browser_pid = int(pid_match.group(1))
-                            try:
-                                from api_utils.server_state import state
-
-                                state.camoufox_pid = self.camoufox_browser_pid
-                                os.environ["CAMOUFOX_PID"] = str(
-                                    self.camoufox_browser_pid
-                                )
-                            except Exception as pid_err:
-                                logger.debug(
-                                    f"Failed to publish browser PID: {pid_err}"
-                                )
-                            logger.info(
-                                f"[CPU] Captured Camoufox browser PID: {self.camoufox_browser_pid}"
-                            )
-
                     ws_match = ws_regex.search(line_from_camoufox)
                     if ws_match:
                         self.captured_ws_endpoint = ws_match.group(1)
@@ -259,6 +295,25 @@ class CamoufoxProcessManager:
             elif not self.captured_ws_endpoint:
                 logger.error("Failed to capture WebSocket endpoint.")
                 sys.exit(1)
+
+            if self.camoufox_proc and self.camoufox_proc.poll() is None:
+                discovered_pid = _find_camoufox_browser_pid(self.camoufox_proc.pid)
+                if discovered_pid:
+                    self.camoufox_browser_pid = discovered_pid
+                    try:
+                        from api_utils.server_state import state
+
+                        state.camoufox_pid = discovered_pid
+                        os.environ["CAMOUFOX_PID"] = str(discovered_pid)
+                    except Exception as pid_err:
+                        logger.debug(f"Failed to publish browser PID: {pid_err}")
+                    logger.info(
+                        f"[CPU] Captured Camoufox browser PID: {self.camoufox_browser_pid}"
+                    )
+                else:
+                    logger.warning(
+                        f"[CPU] Could not discover Camoufox browser PID under launcher PID {self.camoufox_proc.pid}."
+                    )
 
         except Exception as e_launch_camoufox_internal:
             logger.critical(

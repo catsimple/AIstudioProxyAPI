@@ -78,6 +78,7 @@ async def queue_worker() -> None:
 
     while True:
         request_item: Optional[QueueItem] = None
+        request_dequeued = False
         result_future: Optional[Future] = None
         http_request: Optional[Request] = None
         req_id: str = "UNKNOWN"
@@ -191,6 +192,7 @@ async def queue_worker() -> None:
             request_data = request_item["request_data"]
             http_request = request_item["http_request"]
             result_future = request_item["result_future"]
+            request_dequeued = True
 
             GlobalState.CURRENT_STREAM_REQ_ID = req_id
             logger.info(f"[{req_id}] (Worker) Processing request dequeued.")
@@ -464,11 +466,7 @@ async def queue_worker() -> None:
         finally:
             if request_item:
                 request_queue.task_done()
-            if (
-                state.page_instance
-                and state.is_page_ready
-                and not GlobalState.IS_SHUTTING_DOWN.is_set()
-            ):
+            if request_dequeued and state.page_instance and state.is_page_ready and not GlobalState.IS_SHUTTING_DOWN.is_set():
                 schedule_camoufox_freeze()
 
     logger.info("--- Queue Worker Stopped ---")
