@@ -31,6 +31,7 @@ async def queue_worker() -> None:
     params_cache_lock = state.params_cache_lock
     from browser_utils.auth_rotation import perform_auth_rotation
     from browser_utils.page_controller import PageController
+    from browser_utils.tab_focus import schedule_idle_switch
     from config.global_state import GlobalState
 
     from .error_utils import (
@@ -439,6 +440,12 @@ async def queue_worker() -> None:
 
             was_last_request_streaming = is_streaming_request
             last_request_completion_time = time.time()
+            if (
+                state.page_instance
+                and state.is_page_ready
+                and not GlobalState.IS_SHUTTING_DOWN.is_set()
+            ):
+                schedule_idle_switch()
 
         except asyncio.CancelledError:
             if result_future and not result_future.done():
@@ -463,5 +470,11 @@ async def queue_worker() -> None:
         finally:
             if request_item:
                 request_queue.task_done()
+            if (
+                state.page_instance
+                and state.is_page_ready
+                and not GlobalState.IS_SHUTTING_DOWN.is_set()
+            ):
+                schedule_idle_switch()
 
     logger.info("--- Queue Worker Stopped ---")

@@ -27,6 +27,7 @@ from browser_utils import (
     save_error_snapshot,
 )
 from browser_utils.page_controller import PageController
+from browser_utils.tab_focus import activate_work_page
 
 # --- Configuration Module Imports ---
 from config import (
@@ -792,6 +793,7 @@ async def _process_request_refactored(
         if page is None:
             raise server_error(req_id, "Page is None")
 
+        await activate_work_page(page)
         page_controller = PageController(page, context["logger"], req_id)
         await _handle_model_switching(req_id, context, check_client_disconnected)
         await _handle_parameter_cache(req_id, context)

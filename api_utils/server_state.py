@@ -55,6 +55,7 @@ class ServerState:
         self.playwright_manager: Optional["AsyncPlaywright"] = None
         self.browser_instance: Optional["AsyncBrowser"] = None
         self.page_instance: Optional["AsyncPage"] = None
+        self.idle_page_instance: Optional["AsyncPage"] = None
         self.is_playwright_ready: bool = False
         self.is_browser_connected: bool = False
         self.is_page_ready: bool = False

@@ -27,6 +27,7 @@ from browser_utils import (
     enable_temporary_chat_mode,
     load_excluded_models,
 )
+from browser_utils.tab_focus import close_idle_tab, prepare_idle_tab, schedule_idle_switch
 
 # --- Configuration imports ---
 from config import EXCLUDED_MODELS_FILENAME, NO_PROXY_ENV, get_environment_variable
@@ -161,6 +162,9 @@ async def _initialize_browser_and_page():
         if state.is_page_ready:
             await _handle_initial_model_state_and_storage(state.page_instance)
             await enable_temporary_chat_mode(state.page_instance)
+            await prepare_idle_tab(state.page_instance)
+            await state.page_instance.bring_to_front()
+            schedule_idle_switch()
             state.logger.info("Page initialized successfully.")
         else:
             state.logger.error("Page initialization failed.")
@@ -235,6 +239,13 @@ async def _shutdown_resources():
         finally:
             state.page_instance = None
             state.is_page_ready = False
+
+    try:
+        await close_idle_tab()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.debug(f"Failed to close idle tab during shutdown: {e}")
 
     if state.browser_instance:
         try:
