@@ -1492,6 +1492,7 @@ if __name__ == "__main__":
         camoufox_proc = subprocess.Popen(
             camoufox_internal_cmd_args, **camoufox_popen_kwargs
         )
+        os.environ["CAMOUFOX_PID"] = str(camoufox_proc.pid)
         logger.info(
             f"  Camoufox internal process started (PID: {camoufox_proc.pid}). Waiting for WebSocket endpoint output (max {ENDPOINT_CAPTURE_TIMEOUT}s)..."
         )
@@ -1726,6 +1727,7 @@ if __name__ == "__main__":
     logger.info("  Environment variables set for server.app:")
     env_keys_to_log = [
         "CAMOUFOX_WS_ENDPOINT",
+        "CAMOUFOX_PID",
         "LAUNCH_MODE",
         "SERVER_LOG_LEVEL",
         "SERVER_REDIRECT_PRINT",

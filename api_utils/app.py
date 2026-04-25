@@ -27,7 +27,12 @@ from browser_utils import (
     enable_temporary_chat_mode,
     load_excluded_models,
 )
-from browser_utils.tab_focus import close_idle_tab, prepare_idle_tab, schedule_idle_switch
+from browser_utils.process_control import (
+    cancel_camoufox_freeze,
+    clear_camoufox_pid,
+    schedule_camoufox_freeze,
+    set_camoufox_pid,
+)
 
 # --- Configuration imports ---
 from config import EXCLUDED_MODELS_FILENAME, NO_PROXY_ENV, get_environment_variable
@@ -73,6 +78,12 @@ def _initialize_globals():
     from config.global_state import GlobalState
 
     GlobalState.init_rotation_lock()
+
+    try:
+        pid_env = get_environment_variable("CAMOUFOX_PID")
+        set_camoufox_pid(int(pid_env) if pid_env else None)
+    except Exception as pid_err:
+        state.logger.debug(f"Failed to initialize Camoufox PID from env: {pid_err}")
 
     state.logger.info("API keys and global locks initialized.")
 
@@ -162,9 +173,8 @@ async def _initialize_browser_and_page():
         if state.is_page_ready:
             await _handle_initial_model_state_and_storage(state.page_instance)
             await enable_temporary_chat_mode(state.page_instance)
-            await prepare_idle_tab(state.page_instance)
             await state.page_instance.bring_to_front()
-            schedule_idle_switch()
+            schedule_camoufox_freeze()
             state.logger.info("Page initialized successfully.")
         else:
             state.logger.error("Page initialization failed.")
@@ -192,6 +202,7 @@ async def _shutdown_resources():
         logger.debug(f"Failed to set IS_SHUTTING_DOWN: {e}")
 
     state.should_exit = True
+    cancel_camoufox_freeze()
 
     if state.STREAM_PROCESS:
         try:
@@ -240,12 +251,8 @@ async def _shutdown_resources():
             state.page_instance = None
             state.is_page_ready = False
 
-    try:
-        await close_idle_tab()
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.debug(f"Failed to close idle tab during shutdown: {e}")
+    cancel_camoufox_freeze()
+    clear_camoufox_pid()
 
     if state.browser_instance:
         try:

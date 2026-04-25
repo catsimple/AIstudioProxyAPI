@@ -133,6 +133,13 @@ class CamoufoxProcessManager:
             self.camoufox_proc = subprocess.Popen(
                 camoufox_internal_cmd_args, **camoufox_popen_kwargs
             )
+            try:
+                from api_utils.server_state import state
+
+                state.camoufox_pid = self.camoufox_proc.pid
+                os.environ["CAMOUFOX_PID"] = str(self.camoufox_proc.pid)
+            except Exception as pid_err:
+                logger.debug(f"Failed to publish Camoufox PID: {pid_err}")
             logger.info(
                 f"Camoufox internal process started (PID: {self.camoufox_proc.pid}). Waiting for WebSocket endpoint output (max {ENDPOINT_CAPTURE_TIMEOUT} seconds)..."
             )
@@ -319,4 +326,11 @@ class CamoufoxProcessManager:
             logger.info(
                 "Camoufox internal subprocess not running or already cleaned up."
             )
+        try:
+            from api_utils.server_state import state
+
+            state.camoufox_pid = None
+        except Exception:
+            pass
+        os.environ.pop("CAMOUFOX_PID", None)
         logger.info("--- Cleanup procedure completed (CamoufoxProcessManager) ---")

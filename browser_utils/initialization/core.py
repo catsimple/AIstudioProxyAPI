@@ -503,15 +503,8 @@ async def close_page_logic() -> Tuple[None, bool]:  # pragma: no cover
     """Close page logic"""
     # Need to access global variables
     from api_utils.server_state import state
-    from browser_utils.tab_focus import close_idle_tab
 
     logger.info("--- Running page logic shutdown --- ")
-    try:
-        await close_idle_tab()
-    except asyncio.CancelledError:
-        raise
-    except Exception as idle_close_err:
-        logger.debug(f"Idle tab close during page shutdown failed: {idle_close_err}")
 
     if state.page_instance and not state.page_instance.is_closed():
         try:
