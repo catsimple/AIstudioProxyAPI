@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
 import random
@@ -43,6 +43,40 @@ def _clean_body_text(body: str) -> str:
     if not body:
         return body
     return _CONTROL_CHAR_PATTERN.sub("", body)
+
+
+def _generate_reasoning_sse_chunk(
+    reasoning_delta: str, req_id: str, model_name_for_stream: str
+) -> str:
+    """Generate an OpenAI-compatible SSE chunk with reasoning_content."""
+    chunk = {
+        "id": f"chatcmpl-{req_id}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model_name_for_stream,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": None,
+                    "reasoning_content": reasoning_delta,
+                },
+                "finish_reason": None,
+            }
+        ],
+    }
+    return f"data: {json.dumps(chunk, ensure_ascii=False, separators=(',', ':'))}\n\n"
+
+
+def _build_backend_progress_reasoning_steps() -> List[str]:
+    """Return a short backend progress prelude for reasoning-capable clients."""
+    return [
+        "[SYSTEM] 已接收请求，正在整理上下文...",
+        "[SYSTEM] 正在调整参数并选择模型设置...",
+        "[SYSTEM] 正在提交提示词到浏览器会话...",
+        "[SYSTEM] 正在等待首个模型输出...",
+    ]
 
 
 async def resilient_stream_generator(
@@ -152,6 +186,17 @@ async def gen_sse_from_aux_stream(
     has_started_body = False
 
     try:
+        backend_progress_steps = _build_backend_progress_reasoning_steps()
+        for index, progress_step in enumerate(backend_progress_steps):
+            if index == len(backend_progress_steps) - 1:
+                progress_step = f"{progress_step}\n--------------------------------\n\n"
+            else:
+                progress_step = f"{progress_step}\n"
+            yield _generate_reasoning_sse_chunk(
+                progress_step, req_id, model_name_for_stream
+            )
+            await asyncio.sleep(0.03)
+
         async for raw_data in use_stream_response(
             req_id,
             timeout=timeout,
@@ -166,7 +211,7 @@ async def gen_sse_from_aux_stream(
                 GlobalState.CURRENT_STREAM_REQ_ID
                 and GlobalState.CURRENT_STREAM_REQ_ID != req_id
             ):
-                logger.warning(f"[{req_id}] 🧟 Zombie Stream Detected! Terminating.")
+                logger.warning(f"[{req_id}] 馃 Zombie Stream Detected! Terminating.")
                 break
 
             if GlobalState.QUOTA_EXCEEDED_EVENT.is_set():
@@ -174,19 +219,19 @@ async def gen_sse_from_aux_stream(
 
             if is_response_finalized:
                 logger.warning(
-                    f"[{req_id}] ⚠️ Extraneous message received after response finalization. Ignoring."
+                    f"[{req_id}] 鈿狅笍 Extraneous message received after response finalization. Ignoring."
                 )
                 continue
 
             # Holding Pattern for Recovery
             if GlobalState.IS_RECOVERING:
                 logger.info(
-                    f"[{req_id}] ⏸️ System in Recovery Mode. Holding stream open..."
+                    f"[{req_id}] 鈴革笍 System in Recovery Mode. Holding stream open..."
                 )
                 recovery_wait_start = time.time()
                 while GlobalState.IS_RECOVERING:
                     if time.time() - recovery_wait_start > 120.0:
-                        logger.error(f"[{req_id}] ❌ Recovery Timed Out. Aborting.")
+                        logger.error(f"[{req_id}] 鉂?Recovery Timed Out. Aborting.")
                         yield generate_sse_chunk(
                             "\n\n[SYSTEM: Service Recovery Failed. Please retry.]",
                             req_id,
@@ -199,17 +244,17 @@ async def gen_sse_from_aux_stream(
 
                 if GlobalState.IS_RECOVERING:
                     break
-                logger.info(f"[{req_id}] ▶️ Recovery Complete. Resuming stream.")
+                logger.info(f"[{req_id}] 鈻讹笍 Recovery Complete. Resuming stream.")
 
             if GlobalState.IS_QUOTA_EXCEEDED and not GlobalState.IS_RECOVERING:
                 logger.warning(
-                    f"[{req_id}] ⚠️ Quota exceeded detected. Waiting for recovery initiation..."
+                    f"[{req_id}] 鈿狅笍 Quota exceeded detected. Waiting for recovery initiation..."
                 )
                 await asyncio.sleep(1)
                 if GlobalState.IS_RECOVERING:
                     continue
                 logger.warning(
-                    f"[{req_id}] ⛔ Quota exceeded, waiting for worker to pick up signal..."
+                    f"[{req_id}] 鉀?Quota exceeded, waiting for worker to pick up signal..."
                 )
                 await asyncio.sleep(2)
                 continue
@@ -256,24 +301,9 @@ async def gen_sse_from_aux_stream(
             if len(reason) > last_reason_pos:
                 reason_delta = reason[last_reason_pos:]
                 if not has_started_body:
-                    output = {
-                        "id": chat_completion_id,
-                        "object": "chat.completion.chunk",
-                        "model": model_name_for_stream,
-                        "created": created_timestamp,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {
-                                    "role": "assistant",
-                                    "content": None,
-                                    "reasoning_content": reason_delta,
-                                },
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield f"data: {json.dumps(output, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                    yield _generate_reasoning_sse_chunk(
+                        reason_delta, req_id, model_name_for_stream
+                    )
                 last_reason_pos = len(reason)
 
             # The Latch: Body Handling
@@ -611,3 +641,5 @@ async def gen_sse_from_playwright(
     finally:
         if not completion_event.is_set():
             completion_event.set()
+
+

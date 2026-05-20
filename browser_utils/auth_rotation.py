@@ -569,10 +569,29 @@ async def perform_auth_rotation(target_model_id: str = None) -> bool:
                     # Add a small buffer to avoid timing issues
                     wait_time = (min_expiry - now) + 1
                     if wait_time > 0:
+                        # [DEADLOCK-FIX] Cap wait time to avoid holding locks for hours.
+                        # If cooldown is longer than 30s, fail fast and let the caller retry later
+                        # instead of blocking the entire request pipeline.
+                        max_wait = 30.0
+                        if wait_time > max_wait:
+                            logger.warning(
+                                f"🕒 Next profile available in {wait_time:.0f}s (> {max_wait:.0f}s cap). "
+                                f"Failing fast to avoid deadlock. Will retry on next request."
+                            )
+                            failed_attempts += 1
+                            continue
+
                         logger.info(
                             f"🕒 Waiting for {wait_time:.2f} seconds for the next profile to become available."
                         )
-                        await asyncio.sleep(wait_time)
+                        # Sleep in small intervals so we can be interrupted by shutdown
+                        remaining = wait_time
+                        while remaining > 0:
+                            chunk = min(2.0, remaining)
+                            await asyncio.sleep(chunk)
+                            remaining -= chunk
+                            if GlobalState.IS_SHUTTING_DOWN.is_set():
+                                return False
 
                         # Retry getting the profile
                         logger.info("Retrying to get next profile after waiting.")

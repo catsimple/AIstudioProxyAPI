@@ -380,11 +380,12 @@ class ThinkingController(BaseController):
             option = self.page.locator(target_option_selector)
             await expect_async(option).to_be_visible(timeout=5000)
             await option.click(timeout=CLICK_TIMEOUT_MS)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.3)
             try:
                 await expect_async(
                     self.page.locator(
-                        '[role="listbox"][aria-label="Thinking Level"], [role="listbox"][aria-label="Thinking level"]'
+                        '[role="listbox"][aria-label="Thinking Level"], '
+                        '[role="listbox"][aria-label="Thinking level"]'
                     ).first
                 ).to_be_hidden(timeout=2000)
             except asyncio.CancelledError:
@@ -395,7 +396,7 @@ class ThinkingController(BaseController):
                     await self.page.keyboard.press("Escape")
                 except Exception:
                     pass
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
             value_text = await trigger.locator(
                 ".mat-mdc-select-value-text .mat-mdc-select-min-line"
             ).inner_text(timeout=3000)

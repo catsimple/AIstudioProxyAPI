@@ -163,10 +163,15 @@ async def queue_worker() -> None:
                         logger.info("✅ Auth rotation completed successfully.")
                     else:
                         logger.error("❌ Auth rotation failed.")
-                        await asyncio.sleep(1)
                 finally:
                     GlobalState.finish_recovery()
                 if not rotation_success:
+                    # [DEADLOCK-FIX] Backoff before retrying rotation.
+                    # All profiles are likely on cooldown; retrying immediately
+                    # would just fail again. Wait 30s to let cooldowns expire.
+                    backoff = 30.0
+                    logger.info(f"⏳ Rotation backoff: waiting {backoff:.0f}s before retry...")
+                    await asyncio.sleep(backoff)
                     continue
 
             if GlobalState.IS_SHUTTING_DOWN.is_set():
@@ -395,6 +400,10 @@ async def queue_worker() -> None:
                 ):
                     GlobalState.NEEDS_ROTATION = False
                     just_rotated = True
+                else:
+                    # [DEADLOCK-FIX] Backoff before next attempt
+                    logger.info("⏳ Post-request rotation failed, backing off 30s...")
+                    await asyncio.sleep(30)
 
             # [CLEANUP]
             try:

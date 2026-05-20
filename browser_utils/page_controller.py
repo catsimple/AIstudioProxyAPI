@@ -80,9 +80,14 @@ class PageController(
             check_client_disconnected, "Start Parameter Adjustment"
         )
         temp = request_params.get("temperature", DEFAULT_TEMPERATURE)
-        await self._adjust_temperature(
-            temp, page_params_cache, params_cache_lock, check_client_disconnected
-        )
+        if self._supports_temperature(model_id_to_use):
+            await self._adjust_temperature(
+                temp, page_params_cache, params_cache_lock, check_client_disconnected
+            )
+        else:
+            self.logger.debug(
+                f"[Param] Temperature: skipped for model '{model_id_to_use}' (not supported)"
+            )
         max_tokens = request_params.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS)
         await self._adjust_max_tokens(
             max_tokens,
@@ -97,7 +102,12 @@ class PageController(
             stop, page_params_cache, params_cache_lock, check_client_disconnected
         )
         top_p = request_params.get("top_p", DEFAULT_TOP_P)
-        await self._adjust_top_p(top_p, check_client_disconnected)
+        if self._supports_top_p(model_id_to_use):
+            await self._adjust_top_p(top_p, check_client_disconnected)
+        else:
+            self.logger.debug(
+                f"[Param] Top P: skipped for model '{model_id_to_use}' (not supported)"
+            )
         await self._ensure_tools_panel_expanded(check_client_disconnected)
 
         # Force disable URL context if function calling is active

@@ -43,9 +43,14 @@ class ParameterController(BaseController):
 
         # Adjust Temperature
         temp_to_set = request_params.get("temperature", DEFAULT_TEMPERATURE)
-        await self._adjust_temperature(
-            temp_to_set, page_params_cache, params_cache_lock, check_client_disconnected
-        )
+        if self._supports_temperature(model_id_to_use):
+            await self._adjust_temperature(
+                temp_to_set, page_params_cache, params_cache_lock, check_client_disconnected
+            )
+        else:
+            self.logger.debug(
+                f"[Param] Temperature: skipped for model '{model_id_to_use}' (not supported)"
+            )
         await self._check_disconnect(
             check_client_disconnected, "After Temperature Adjustment"
         )
@@ -77,7 +82,12 @@ class ParameterController(BaseController):
 
         # Adjust Top P
         top_p_to_set = request_params.get("top_p", DEFAULT_TOP_P)
-        await self._adjust_top_p(top_p_to_set, check_client_disconnected)
+        if self._supports_top_p(model_id_to_use):
+            await self._adjust_top_p(top_p_to_set, check_client_disconnected)
+        else:
+            self.logger.debug(
+                f"[Param] Top P: skipped for model '{model_id_to_use}' (not supported)"
+            )
         await self._check_disconnect(
             check_client_disconnected, "End Parameter Adjustment"
         )
@@ -619,6 +629,25 @@ class ParameterController(BaseController):
             )
             return ENABLE_GOOGLE_SEARCH
 
+    def _supports_temperature(self, model_id: Optional[str]) -> bool:
+        """Check if model supports temperature parameter."""
+        if not model_id:
+            return True
+        model_lower = model_id.lower()
+        # gemini-3.5-flash does not expose temperature/top_p in its UI
+        if "gemini-3.5-flash" in model_lower or "gemini-3-5-flash" in model_lower:
+            return False
+        return True
+
+    def _supports_top_p(self, model_id: Optional[str]) -> bool:
+        """Check if model supports Top P parameter."""
+        if not model_id:
+            return True
+        model_lower = model_id.lower()
+        if "gemini-3.5-flash" in model_lower or "gemini-3-5-flash" in model_lower:
+            return False
+        return True
+
     def _supports_google_search(self, model_id: Optional[str]) -> bool:
         """Check if model supports Google Search."""
         if not model_id:
@@ -674,6 +703,22 @@ class ParameterController(BaseController):
                     "[Param] Google Search: Toggle is disabled (likely due to function calling being enabled), skipping"
                 )
                 return
+
+            # [OVERLAY-FIX] Dismiss any open mat-select dropdown panels that may
+            # intercept pointer events (e.g. Thinking Level dropdown left open
+            # by _handle_thinking_budget). Press Escape to close overlays.
+            try:
+                open_panel = self.page.locator(
+                    ".mat-mdc-select-panel.mdc-menu-surface--open"
+                )
+                if await open_panel.count() > 0:
+                    self.logger.debug(
+                        "[Param] Google Search: Dismissing open dropdown overlay."
+                    )
+                    await self.page.keyboard.press("Escape")
+                    await asyncio.sleep(0.3)
+            except Exception:
+                pass
 
             try:
                 await toggle_locator.scroll_into_view_if_needed()

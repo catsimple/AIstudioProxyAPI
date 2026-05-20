@@ -743,16 +743,13 @@ async def _process_request_refactored(
         logger.info(f"[{req_id}] ▶️ Resuming after Auth Rotation.")
 
     # [GR-03] Pre-Flight Graceful Rotation Check
-    if GlobalState.NEEDS_ROTATION:
-        logger.info(f"[{req_id}] 🔄 Graceful Rotation Pending. Initiating rotation...")
-        from api_utils.server_state import state
-
-        current_model_id = state.current_ai_studio_model_id
-        from browser_utils.auth_rotation import perform_auth_rotation
-
-        if await perform_auth_rotation(target_model_id=current_model_id):
-            GlobalState.NEEDS_ROTATION = False
-            logger.info(f"[{req_id}] ✅ Pre-flight rotation complete.")
+    # [DEADLOCK-FIX] Do NOT call perform_auth_rotation here while inside processing_lock.
+    # Rotation is handled by queue_worker both before (line ~148) and after (line ~396)
+    # the processing_lock is acquired. If NEEDS_ROTATION gets set mid-processing (e.g. by
+    # token counting), the post-request rotation will catch it. Aborting here would
+    # waste the work already done (prompt submitted, browser waiting for response).
+    # If IS_QUOTA_EXCEEDED is set, the worker-level pre-check should have caught it;
+    # if we reach here anyway, let the request fail naturally rather than deadlock.
 
     is_connected = await _test_client_connection(req_id, http_request)
     if not is_connected:
