@@ -210,10 +210,48 @@ async def use_stream_response(
                             or "quota" in message.lower()
                             or "permission denied" in message.lower()
                         ):
+                            # DEBUG: screenshot and save HTML on quota/403 errors
+                            if page is not None:
+                                try:
+                                    import os
+                                    from datetime import datetime
+                                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    debug_dir = "errors_py"
+                                    os.makedirs(debug_dir, exist_ok=True)
+                                    screenshot_path = os.path.join(debug_dir, f"quota_debug_{req_id}_{ts}.png")
+                                    html_path = os.path.join(debug_dir, f"quota_debug_{req_id}_{ts}.html")
+                                    await page.screenshot(path=screenshot_path, full_page=False)
+                                    html_content = await page.content()
+                                    with open(html_path, "w", encoding="utf-8") as f:
+                                        f.write(html_content)
+                                    logger.warning(
+                                        f"[{req_id}] QUOTA DEBUG: screenshot={screenshot_path}, html={html_path}"
+                                    )
+                                except Exception as dbg_err:
+                                    logger.debug(f"[{req_id}] quota debug capture failed: {dbg_err}")
                             raise QuotaExceededError(
                                 f"AI Studio quota exceeded: {message}", req_id=req_id
                             )
                         else:
+                            # DEBUG: screenshot and save HTML on 403
+                            if status == 403 and page is not None:
+                                try:
+                                    import os
+                                    from datetime import datetime
+                                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    debug_dir = "errors_py"
+                                    os.makedirs(debug_dir, exist_ok=True)
+                                    screenshot_path = os.path.join(debug_dir, f"403_debug_{req_id}_{ts}.png")
+                                    html_path = os.path.join(debug_dir, f"403_debug_{req_id}_{ts}.html")
+                                    await page.screenshot(path=screenshot_path, full_page=False)
+                                    html_content = await page.content()
+                                    with open(html_path, "w", encoding="utf-8") as f:
+                                        f.write(html_content)
+                                    logger.warning(
+                                        f"[{req_id}] 403 DEBUG: screenshot={screenshot_path}, html={html_path}"
+                                    )
+                                except Exception as dbg_err:
+                                    logger.debug(f"[{req_id}] 403 debug capture failed: {dbg_err}")
                             raise UpstreamError(
                                 f"AI Studio error: {message}",
                                 status_code=status,
