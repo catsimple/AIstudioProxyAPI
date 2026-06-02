@@ -429,22 +429,8 @@ class ProxyServer:
                         server_buffer.clear()
             except ConnectionResetError:
                 self.logger.debug("Connection reset by peer processing server data.")
-                if self.queue is not None:
-                    self.queue.put(json.dumps({
-                        "error": True,
-                        "status": 502,
-                        "message": "502 Bad Gateway: Connection reset by upstream",
-                        "done": True,
-                    }))
             except Exception as e:
                 self.logger.error(f"Error processing server data: {e}", exc_info=True)
-                if self.queue is not None:
-                    self.queue.put(json.dumps({
-                        "error": True,
-                        "status": 502,
-                        "message": f"502 Bad Gateway: {e}",
-                        "done": True,
-                    }))
             finally:
                 self._safe_close(client_writer)
 
