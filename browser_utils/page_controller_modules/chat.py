@@ -319,6 +319,30 @@ class ChatController(BaseController):
         and remove interfering iframes like google-hats-survey.
         """
         try:
+            # 0. Dismiss Google Cookie Notification Bar
+            try:
+                cookie_bar = self.page.locator(
+                    "div.glue-cookie-notification-bar.visible"
+                )
+                if await cookie_bar.count() > 0:
+                    self.logger.info(
+                        f"[{self.req_id}] Detected cookie notification bar, dismissing..."
+                    )
+                    reject_btn = cookie_bar.locator(
+                        "button.glue-cookie-notification-bar__reject"
+                    )
+                    if await reject_btn.count() > 0:
+                        await reject_btn.click(timeout=2000)
+                    else:
+                        await self.page.evaluate(
+                            '() => { document.querySelectorAll("div.glue-cookie-notification-bar").forEach(el => el.remove()); }'
+                        )
+                    await asyncio.sleep(0.3)
+            except Exception as e_cookie:
+                self.logger.debug(
+                    f"[{self.req_id}] Cookie bar dismissal (non-critical): {e_cookie}"
+                )
+
             # 1. Remove Google Survey Iframe
             try:
                 survey_iframe = self.page.locator(
@@ -371,6 +395,20 @@ class ChatController(BaseController):
                         pass
                 else:
                     break
+
+            # 3. Dismiss any remaining tooltip surfaces
+            try:
+                tooltip_surface = self.page.locator(
+                    "div.cdk-overlay-container div.mat-mdc-tooltip-surface"
+                )
+                if await tooltip_surface.count() > 0:
+                    self.logger.debug("Dismissing tooltip surface overlay...")
+                    await self.page.mouse.move(10, 10)
+                    await self.page.keyboard.press("Escape")
+                    await asyncio.sleep(0.2)
+            except Exception:
+                pass
+
         except asyncio.CancelledError:
             raise
         except Exception:

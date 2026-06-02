@@ -204,7 +204,12 @@ async def use_stream_response(
                     if actual_data.get("error"):
                         status = actual_data.get("status", 500)
                         message = actual_data.get("message", "Unknown error")
-                        if status == 429 or "quota" in message.lower():
+                        if (
+                            status == 429
+                            or status == 403
+                            or "quota" in message.lower()
+                            or "permission denied" in message.lower()
+                        ):
                             raise QuotaExceededError(
                                 f"AI Studio quota exceeded: {message}", req_id=req_id
                             )

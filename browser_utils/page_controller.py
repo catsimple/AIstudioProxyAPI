@@ -241,13 +241,53 @@ class PageController(
                     f"[{self.req_id}] Error during submit (Attempt {attempt + 1}): {e}"
                 )
                 if attempt < max_retries - 1:
-                    await self._safe_reload_page()
+                    try:
+                        await self._safe_reload_page()
+                    except Exception as reload_err:
+                        self.logger.error(
+                            f"[{self.req_id}] Reload failed, aborting retry: {reload_err}"
+                        )
+                        raise reload_err
                     await asyncio.sleep(2)
                 else:
                     raise e
 
     async def _open_upload_menu_and_choose_file(self, files_list: List[str]) -> bool:
         """Upload files via menu."""
+        # Dismiss cookie notification bar if present (blocks pointer events)
+        try:
+            cookie_bar = self.page.locator(
+                "div.glue-cookie-notification-bar.visible"
+            )
+            if await cookie_bar.count() > 0:
+                self.logger.debug("Dismissing cookie bar before upload...")
+                reject_btn = cookie_bar.locator(
+                    "button.glue-cookie-notification-bar__reject"
+                )
+                if await reject_btn.count() > 0:
+                    await reject_btn.click(timeout=2000)
+                else:
+                    await self.page.evaluate(
+                        '() => { document.querySelectorAll("div.glue-cookie-notification-bar").forEach(el => el.remove()); }'
+                    )
+                await asyncio.sleep(0.3)
+        except Exception:
+            pass
+
+        # Dismiss any open overlays/tooltips that may block pointer events
+        try:
+            blocking_overlay = self.page.locator(
+                "div.cdk-overlay-container div.mat-mdc-tooltip-surface, "
+                "div.cdk-overlay-container .mat-mdc-select-panel.mdc-menu-surface--open"
+            )
+            if await blocking_overlay.count() > 0:
+                self.logger.debug("Dismissing overlay/tooltip before upload click...")
+                await self.page.mouse.move(10, 10)
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+        except Exception:
+            pass
+
         await self.page.locator(UPLOAD_BUTTON_SELECTOR).first.click()
         btn = self.page.locator("div[role='menu'] button[role='menuitem']").filter(
             has_text="Upload File"
@@ -263,8 +303,22 @@ class PageController(
 
     async def _safe_reload_page(self):
         """Reload page safely."""
-        await self.page.reload(timeout=30000)
-        await self.page.wait_for_load_state("domcontentloaded", timeout=30000)
+        try:
+            await self.page.reload(timeout=15000)
+        except Exception:
+            self.logger.warning(
+                f"[{self.req_id}] Page reload timed out, forcing navigation..."
+            )
+            try:
+                await self.page.goto(
+                    self.page.url, wait_until="domcontentloaded", timeout=30000
+                )
+            except Exception:
+                self.logger.error(
+                    f"[{self.req_id}] Forced navigation also failed"
+                )
+                raise
+        await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
 
     async def get_response(
         self,
