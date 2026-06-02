@@ -143,6 +143,8 @@ class ProxyServer:
             writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             await writer.drain()
 
+            await reader.read(8192)
+
             loop = asyncio.get_running_loop()
             transport = writer.transport
 
