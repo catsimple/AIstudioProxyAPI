@@ -462,7 +462,7 @@ class ProxyServer:
         addr = server.sockets[0].getsockname()
         self.logger.debug(f"[Proxy] Serving on: {addr}")
 
-        if self.queue:
+        if self.queue is not None:
             try:
                 self.queue.put("READY")
                 self.logger.debug("[Proxy] Sent READY signal")

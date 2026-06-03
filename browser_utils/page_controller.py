@@ -25,6 +25,8 @@ from config import (
     UPLOAD_BUTTON_SELECTOR,
 )
 from models import ClientDisconnectedError, QuotaExceededError
+from browser_utils.ghost_cursor_helper import human_click
+from python_ghost_cursor.shared._math import Vector
 
 from .initialization import enable_temporary_chat_mode
 from .operations import (
@@ -162,6 +164,9 @@ class PageController(
                     check_client_disconnected, "After Input Visible"
                 )
 
+                await textarea.click(timeout=3000)
+                await asyncio.sleep(0.1)
+
                 # Fill textarea using centralized logic (inherited from InputController if possible, or direct)
                 await textarea.evaluate(
                     "(el, t) => { el.value = t; el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); }",
@@ -192,45 +197,36 @@ class PageController(
 
                 if is_btn_enabled:
                     try:
-                        # Defensive workarounds before click: handle dialogs, backdrops and tooltips
                         await self._handle_post_upload_dialog()
                         await self._dismiss_backdrops()
                         if hasattr(self, "_dismiss_tooltip_overlays"):
                             await self._dismiss_tooltip_overlays()
 
-                        await submit.click(timeout=5000)
+                        try:
+                            ta_box = await textarea.bounding_box()
+                            start_pos = Vector(
+                                ta_box["x"] + ta_box["width"] / 2,
+                                ta_box["y"] + ta_box["height"] / 2,
+                            ) if ta_box else Vector(0, 0)
+                            await human_click(self.page, SUBMIT_BUTTON_SELECTOR, move_duration=0.03, start_pos=start_pos)
+                            self.logger.info(f"[{self.req_id}] Submit button clicked via ghost cursor.")
+                        except Exception as pw_err:
+                            self.logger.warning(
+                                f"[{self.req_id}] Ghost cursor click failed: {pw_err}, trying locator click..."
+                            )
+                            await submit.click(timeout=5000)
+                            self.logger.info(f"[{self.req_id}] Submit button clicked via locator fallback.")
                         button_clicked = True
-                        self.logger.info(f"[{self.req_id}] Submit button clicked.")
                         await check_quota_limit(self.page, self.req_id)
                     except QuotaExceededError:
                         raise
                     except Exception as click_err:
-                        self.logger.warning(
-                            f"[{self.req_id}] Button click failed: {click_err}. Trying keyboard fallback."
+                        self.logger.error(
+                            f"[{self.req_id}] Submit button click failed: {click_err}"
                         )
 
                 if not button_clicked:
-                    # Keyboard fallbacks (using logic inherited from InputController)
-                    self.logger.info(
-                        f"[{self.req_id}] Attempting Enter key submission..."
-                    )
-                    if await self._try_enter_submit(
-                        textarea, check_client_disconnected
-                    ):
-                        button_clicked = True
-                    else:
-                        self.logger.info(
-                            f"[{self.req_id}] Attempting Combo key submission..."
-                        )
-                        if await self._try_combo_submit(
-                            textarea, check_client_disconnected
-                        ):
-                            button_clicked = True
-
-                if not button_clicked:
-                    raise Exception(
-                        "Failed to submit prompt via button or keyboard shortcuts."
-                    )
+                    raise Exception("Failed to submit prompt: all click methods failed.")
 
                 await self._check_disconnect(check_client_disconnected, "After Submit")
                 return

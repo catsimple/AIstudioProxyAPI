@@ -5,6 +5,7 @@ FastAPI application initialization and lifecycle management
 import asyncio
 import multiprocessing
 import queue
+import socket
 import sys
 import time
 from asyncio import Lock, Queue
@@ -129,15 +130,56 @@ async def _start_stream_proxy():
         state.logger.info("STREAM proxy process started. Waiting for 'READY' signal...")
 
         try:
-            ready_signal = await asyncio.to_thread(state.STREAM_QUEUE.get, timeout=15)
-            if ready_signal == "READY":
-                state.logger.info(
-                    "[SUCCESS] Received 'READY' signal from STREAM proxy."
-                )
+            startup_timeout = int(
+                get_environment_variable("STREAM_PROXY_STARTUP_TIMEOUT", "45")
+            )
+            deadline = time.time() + startup_timeout
+            ready = False
+
+            while time.time() < deadline:
+                if state.STREAM_PROCESS and state.STREAM_PROCESS.exitcode is not None:
+                    raise RuntimeError(
+                        f"STREAM proxy exited early with code {state.STREAM_PROCESS.exitcode}."
+                    )
+
+                try:
+                    ready_signal = await asyncio.to_thread(
+                        state.STREAM_QUEUE.get, timeout=0.5
+                    )
+                    if ready_signal == "READY":
+                        ready = True
+                        break
+                    state.logger.warning(
+                        f"Received unexpected signal from proxy: {ready_signal}"
+                    )
+                except queue.Empty:
+                    pass
+
+                # Fallback: if the local port is already listening, treat the proxy as ready.
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(0.5)
+                    try:
+                        if sock.connect_ex(("127.0.0.1", port)) == 0:
+                            ready = True
+                            break
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(0.25)
+
+            if ready:
+                state.logger.info("[SUCCESS] STREAM proxy is ready.")
             else:
-                state.logger.warning(
-                    f"Received unexpected signal from proxy: {ready_signal}"
+                exitcode = (
+                    state.STREAM_PROCESS.exitcode
+                    if state.STREAM_PROCESS
+                    else "unknown"
                 )
+                state.logger.error(
+                    "[ERROR] Timed out waiting for STREAM proxy to become ready. "
+                    f"Startup will likely fail. exitcode={exitcode}, port={port}"
+                )
+                raise RuntimeError("STREAM proxy failed to start in time.")
         except queue.Empty:
             state.logger.error(
                 "[ERROR] Timed out waiting for STREAM proxy to become ready. Startup will likely fail."

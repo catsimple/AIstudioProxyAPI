@@ -163,6 +163,8 @@ def _signal_camoufox_process(sig: int) -> bool:
 async def resume_camoufox_process(warmup_seconds: float = 0.2) -> bool:
     """Resume a frozen Camoufox process and give it a short warmup window."""
     cancel_camoufox_freeze()
+    if sys.platform == "win32":
+        return False
     resumed = _signal_camoufox_process(signal.SIGCONT)
     if resumed and warmup_seconds > 0:
         await asyncio.sleep(warmup_seconds)

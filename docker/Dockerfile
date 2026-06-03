@@ -25,12 +25,13 @@ RUN if [ -n "$PROXY_ADDR" ]; then \
     printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' "$PROXY_ADDR" "$PROXY_ADDR" > /etc/apt/apt.conf.d/99proxy; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends curl \
+    apt-get install -y --no-install-recommends curl gcc g++ pkg-config libffi-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/* && \
     if [ -n "$PROXY_ADDR" ]; then rm -f /etc/apt/apt.conf.d/99proxy; fi
 
 ENV HTTP_PROXY=${PROXY_ADDR}
 ENV HTTPS_PROXY=${PROXY_ADDR}
+ENV BEZIER_NO_EXTENSION=1
 
 ENV POETRY_HOME="/opt/poetry"
 ENV POETRY_VERSION=1.8.3

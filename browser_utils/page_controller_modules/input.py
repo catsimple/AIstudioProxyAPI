@@ -18,6 +18,8 @@ from config.selector_utils import (
 )
 from logging_utils import set_request_id
 from models import ClientDisconnectedError
+from browser_utils.ghost_cursor_helper import human_click
+from python_ghost_cursor.shared._math import Vector
 
 from .base import BaseController
 
@@ -50,6 +52,9 @@ class InputController(BaseController):
             await self._check_disconnect(
                 check_client_disconnected, "After Input Visible"
             )
+
+            await prompt_textarea_locator.click(timeout=3000)
+            await asyncio.sleep(0.1)
 
             # Fill text using JavaScript
             await prompt_textarea_locator.evaluate(
@@ -130,55 +135,48 @@ class InputController(BaseController):
             )
             await asyncio.sleep(0.3)
 
-            # Try clicking button first, then Enter, then Combo keys
             button_clicked = False
             try:
                 self.logger.debug("[Input] Attempting to click submit button...")
-                # Handle potential dialogs before submit
                 await self._handle_post_upload_dialog()
-                # Try to clear tooltip overlays
                 await self._dismiss_tooltip_overlays()
+
                 try:
-                    await submit_button_locator.click(timeout=5000)
-                except Exception:
-                    # If normal click fails (possibly blocked by tooltip), use JavaScript click
+                    textarea_box = await prompt_textarea_locator.bounding_box()
+                    start_pos = Vector(
+                        textarea_box["x"] + textarea_box["width"] / 2,
+                        textarea_box["y"] + textarea_box["height"] / 2,
+                    ) if textarea_box else Vector(0, 0)
+                    await human_click(self.page, SUBMIT_BUTTON_SELECTOR, move_duration=0.03, start_pos=start_pos)
+                    self.logger.debug("[Input] Ghost cursor click on submit button succeeded")
+                    button_clicked = True
+                except Exception as pw_err:
                     self.logger.debug(
-                        "[Input] Normal click failed, attempting JavaScript click..."
+                        f"[Input] Ghost cursor click failed: {pw_err}, trying locator click..."
                     )
-                    js_clicked = await self._js_click_submit_button(
-                        submit_button_locator
-                    )
-                    if not js_clicked:
-                        # Finally try force click
-                        self.logger.debug(
-                            "[Input] JavaScript click failed, attempting force click..."
-                        )
-                        await submit_button_locator.click(timeout=5000, force=True)
-                self.logger.debug("[Input] Submit button click complete")
-                button_clicked = True
+                    try:
+                        await submit_button_locator.click(timeout=5000)
+                        button_clicked = True
+                    except Exception as click_err2:
+                        self.logger.error(f"[Input] Locator click also failed: {click_err2}")
+
+                if button_clicked:
+                    await asyncio.sleep(0.5)
+                    try:
+                        is_still_enabled = await submit_button_locator.is_enabled(timeout=2000)
+                        if not is_still_enabled:
+                            self.logger.debug("[Input] Submit button disabled — submission accepted")
+                        else:
+                            self.logger.debug("[Input] Submit button still enabled after click")
+                    except Exception:
+                        pass
+
             except Exception as click_err:
                 self.logger.error(f"Submit button click failed: {click_err}")
                 await save_error_snapshot(f"submit_button_click_fail_{self.req_id}")
 
             if not button_clicked:
-                self.logger.info(
-                    "Button submit failed, attempting Enter key submission..."
-                )
-                submitted_successfully = await self._try_enter_submit(
-                    prompt_textarea_locator, check_client_disconnected
-                )
-                if not submitted_successfully:
-                    self.logger.info(
-                        "Enter submission failed, attempting combo key submission..."
-                    )
-                    combo_ok = await self._try_combo_submit(
-                        prompt_textarea_locator, check_client_disconnected
-                    )
-                    if not combo_ok:
-                        self.logger.error("Combo key submission also failed.")
-                        raise Exception(
-                            "Submit failed: Button, Enter, and Combo key all failed"
-                        )
+                raise Exception("Failed to submit prompt: all click methods failed.")
 
             await self._check_disconnect(check_client_disconnected, "After Submit")
 
@@ -398,6 +396,51 @@ class InputController(BaseController):
             raise
         except Exception as e:
             self.logger.debug(f"[Input] Tooltip cleanup exception: {e}")
+
+    async def _simulate_real_mouse_click(self, submit_button_locator) -> bool:
+        """Simulate a complete, trusted mouse event chain on the submit button.
+
+        AI Studio's backend validates that the Run/Submit button was triggered via
+        a real mouse interaction. Keyboard-triggered submissions (Enter/Space) can
+        result in a 403 Forbidden response. This method fires the full pointer +
+        mouse event sequence so the frontend framework treats it identically to a
+        physical mouse click.
+        """
+        try:
+            result = await submit_button_locator.evaluate("""
+                (el) => {
+                    const opts = {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        isTrusted: true,
+                        clientX: el.getBoundingClientRect().x + el.getBoundingClientRect().width / 2,
+                        clientY: el.getBoundingClientRect().y + el.getBoundingClientRect().height / 2,
+                    };
+                    el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, button: 0, pointerId: 1, isPrimary: true }));
+                    el.dispatchEvent(new PointerEvent('pointerup',   { ...opts, button: 0, pointerId: 1, isPrimary: true }));
+                    el.dispatchEvent(new MouseEvent('mousedown',    { ...opts, button: 0, detail: 1 }));
+                    el.dispatchEvent(new MouseEvent('mouseup',      { ...opts, button: 0, detail: 1 }));
+                    el.dispatchEvent(new MouseEvent('click',        { ...opts, button: 0, detail: 1 }));
+                    return 'dispatched';
+                }
+            """)
+            if result == 'dispatched':
+                self.logger.debug("[Input] Full mouse-event chain dispatched on submit button")
+                return True
+            self.logger.warning(f"[Input] Unexpected result from mouse simulation: {result}")
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger.debug(f"[Input] Mouse-event chain simulation failed, falling back to el.click(): {e}")
+            try:
+                await submit_button_locator.evaluate("el => el.click()")
+                self.logger.debug("[Input] Fallback JS click succeeded")
+                return True
+            except Exception as fallback_err:
+                self.logger.debug(f"[Input] Fallback JS click also failed: {fallback_err}")
+                return False
 
     async def _js_click_submit_button(self, submit_button_locator) -> bool:
         """Use JavaScript to trigger the submit button click event directly."""
