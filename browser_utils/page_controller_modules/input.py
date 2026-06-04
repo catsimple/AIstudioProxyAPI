@@ -34,152 +34,33 @@ class InputController(BaseController):
         set_request_id(self.req_id)
         self.logger.debug(f"[Input] Filling prompt ({len(prompt)} chars)")
         prompt_textarea_locator = self.page.locator(PROMPT_TEXTAREA_SELECTOR)
-        # Use centralized selectors supporting new and old UI structures
         autosize_wrapper_locator = self.page.locator(
-            build_combined_selector(
-                AUTOSIZE_WRAPPER_SELECTORS[:2]
-            )  # .text-wrapper element
+            build_combined_selector(AUTOSIZE_WRAPPER_SELECTORS[:2])
         )
         legacy_autosize_wrapper = self.page.locator(
-            build_combined_selector(
-                AUTOSIZE_WRAPPER_SELECTORS[2:]
-            )  # ms-autosize-textarea element
+            build_combined_selector(AUTOSIZE_WRAPPER_SELECTORS[2:])
         )
         submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
 
         try:
-            await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
-            await self._check_disconnect(
-                check_client_disconnected, "After Input Visible"
+            await asyncio.wait_for(
+                self._do_submit(prompt, image_list, check_client_disconnected,
+                                prompt_textarea_locator, autosize_wrapper_locator,
+                                legacy_autosize_wrapper, submit_button_locator),
+                timeout=120.0,
             )
-
-            await prompt_textarea_locator.click(timeout=3000)
-            await asyncio.sleep(0.1)
-
-            # Fill text using JavaScript
-            await prompt_textarea_locator.evaluate(
-                """
-                (element, text) => {
-                    element.value = text;
-                    element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-                    element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                }
-                """,
-                prompt,
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                f"[{self.req_id}] submit_prompt timed out after 120s, reloading page and retrying..."
             )
-            autosize_target = autosize_wrapper_locator
-            if await autosize_target.count() == 0:
-                autosize_target = legacy_autosize_wrapper
-            if await autosize_target.count() > 0:
-                try:
-                    await autosize_target.first.evaluate(
-                        '(element, text) => { element.setAttribute("data-value", text); }',
-                        prompt,
-                    )
-                except Exception as autosize_err:
-                    self.logger.debug(
-                        f"autosize wrapper update skipped: {autosize_err}"
-                    )
-            await self._check_disconnect(check_client_disconnected, "After Input Fill")
-
-            # Attachment upload handled below if needed
-            if len(image_list) > 0:
-                ok = await self._open_upload_menu_and_choose_file(image_list)
-                if not ok:
-                    self.logger.error(
-                        "Error during file upload: Failed to set files via menu method"
-                    )
-
-            # Wait for submit button to be enabled (using configurable fast-fail timeout)
-            from config.timeouts import SUBMIT_BUTTON_ENABLE_TIMEOUT_MS
-
-            wait_timeout_ms_submit_enabled = SUBMIT_BUTTON_ENABLE_TIMEOUT_MS
-            start_time = asyncio.get_event_loop().time()
-            self.logger.debug(
-                f"[Input] Waiting for submit button (max {wait_timeout_ms_submit_enabled}ms)"
-            )
-
             try:
-                while True:
-                    await self._check_disconnect(
-                        check_client_disconnected, "Waiting for Submit Button Enabled"
-                    )
-
-                    try:
-                        # Use short timeout polling to respond to interruption signals
-                        if await submit_button_locator.is_enabled(timeout=500):
-                            self.logger.debug("[Input] Submit button enabled")
-                            break
-                    except Exception:
-                        # Ignore temporary errors (e.g. element not present yet)
-                        pass
-
-                    if (
-                        asyncio.get_event_loop().time() - start_time
-                    ) * 1000 > wait_timeout_ms_submit_enabled:
-                        raise TimeoutError(
-                            f"Submit button not enabled within {wait_timeout_ms_submit_enabled}ms"
-                        )
-
-                    await asyncio.sleep(0.5)
-
-            except Exception as e_pw_enabled:
-                self.logger.error(
-                    f"Timeout or error waiting for submit button enabled: {e_pw_enabled}"
-                )
-                await save_error_snapshot(f"submit_button_enable_timeout_{self.req_id}")
+                await self.page.reload(wait_until="domcontentloaded", timeout=15000)
+                await asyncio.sleep(2)
+            except Exception as reload_err:
+                self.logger.error(f"[{self.req_id}] Page reload after timeout failed: {reload_err}")
                 raise
-
-            await self._check_disconnect(
-                check_client_disconnected, "After Submit Button Enabled"
-            )
-            await asyncio.sleep(0.3)
-
-            button_clicked = False
-            try:
-                self.logger.debug("[Input] Attempting to click submit button...")
-                await self._handle_post_upload_dialog()
-                await self._dismiss_tooltip_overlays()
-
-                try:
-                    textarea_box = await prompt_textarea_locator.bounding_box()
-                    start_pos = Vector(
-                        textarea_box["x"] + textarea_box["width"] / 2,
-                        textarea_box["y"] + textarea_box["height"] / 2,
-                    ) if textarea_box else Vector(0, 0)
-                    await human_click(self.page, SUBMIT_BUTTON_SELECTOR, move_duration=0.03, start_pos=start_pos)
-                    self.logger.debug("[Input] Ghost cursor click on submit button succeeded")
-                    button_clicked = True
-                except Exception as pw_err:
-                    self.logger.debug(
-                        f"[Input] Ghost cursor click failed: {pw_err}, trying locator click..."
-                    )
-                    try:
-                        await submit_button_locator.click(timeout=5000)
-                        button_clicked = True
-                    except Exception as click_err2:
-                        self.logger.error(f"[Input] Locator click also failed: {click_err2}")
-
-                if button_clicked:
-                    await asyncio.sleep(0.5)
-                    try:
-                        is_still_enabled = await submit_button_locator.is_enabled(timeout=2000)
-                        if not is_still_enabled:
-                            self.logger.debug("[Input] Submit button disabled — submission accepted")
-                        else:
-                            self.logger.debug("[Input] Submit button still enabled after click")
-                    except Exception:
-                        pass
-
-            except Exception as click_err:
-                self.logger.error(f"Submit button click failed: {click_err}")
-                await save_error_snapshot(f"submit_button_click_fail_{self.req_id}")
-
-            if not button_clicked:
-                raise Exception("Failed to submit prompt: all click methods failed.")
-
-            await self._check_disconnect(check_client_disconnected, "After Submit")
-
+            await self._safe_reload_page()
+            raise
         except Exception as e_input_submit:
             if isinstance(e_input_submit, asyncio.CancelledError):
                 raise
@@ -189,6 +70,113 @@ class InputController(BaseController):
             if not isinstance(e_input_submit, ClientDisconnectedError):
                 await save_error_snapshot(f"input_submit_error_{self.req_id}")
             raise
+
+    async def _do_submit(
+        self, prompt: str, image_list: List, check_client_disconnected: Callable,
+        prompt_textarea_locator, autosize_wrapper_locator,
+        legacy_autosize_wrapper, submit_button_locator,
+    ):
+        """Core submit logic, wrapped for timeout."""
+        await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
+        await self._check_disconnect(check_client_disconnected, "After Input Visible")
+
+        await prompt_textarea_locator.click(timeout=3000)
+        await asyncio.sleep(0.1)
+
+        await prompt_textarea_locator.evaluate(
+            """
+            (element, text) => {
+                element.value = text;
+                element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+            }
+            """,
+            prompt,
+        )
+        autosize_target = autosize_wrapper_locator
+        if await autosize_target.count() == 0:
+            autosize_target = legacy_autosize_wrapper
+        if await autosize_target.count() > 0:
+            try:
+                await autosize_target.first.evaluate(
+                    '(element, text) => { element.setAttribute("data-value", text); }',
+                    prompt,
+                )
+            except Exception as autosize_err:
+                self.logger.debug(f"autosize wrapper update skipped: {autosize_err}")
+        await self._check_disconnect(check_client_disconnected, "After Input Fill")
+
+        if len(image_list) > 0:
+            ok = await self._open_upload_menu_and_choose_file(image_list)
+            if not ok:
+                self.logger.error("Error during file upload: Failed to set files via menu method")
+
+        from config.timeouts import SUBMIT_BUTTON_ENABLE_TIMEOUT_MS
+        wait_timeout_ms_submit_enabled = SUBMIT_BUTTON_ENABLE_TIMEOUT_MS
+        start_time = asyncio.get_event_loop().time()
+        self.logger.debug(f"[Input] Waiting for submit button (max {wait_timeout_ms_submit_enabled}ms)")
+
+        try:
+            while True:
+                await self._check_disconnect(check_client_disconnected, "Waiting for Submit Button Enabled")
+                try:
+                    if await submit_button_locator.is_enabled(timeout=500):
+                        self.logger.debug("[Input] Submit button enabled")
+                        break
+                except Exception:
+                    pass
+                if (asyncio.get_event_loop().time() - start_time) * 1000 > wait_timeout_ms_submit_enabled:
+                    raise TimeoutError(f"Submit button not enabled within {wait_timeout_ms_submit_enabled}ms")
+                await asyncio.sleep(0.5)
+        except Exception as e_pw_enabled:
+            self.logger.error(f"Timeout or error waiting for submit button enabled: {e_pw_enabled}")
+            await save_error_snapshot(f"submit_button_enable_timeout_{self.req_id}")
+            raise
+
+        await self._check_disconnect(check_client_disconnected, "After Submit Button Enabled")
+        await asyncio.sleep(0.3)
+
+        button_clicked = False
+        try:
+            self.logger.debug("[Input] Attempting to click submit button...")
+            await self._handle_post_upload_dialog()
+            await self._dismiss_tooltip_overlays()
+
+            try:
+                textarea_box = await prompt_textarea_locator.bounding_box()
+                start_pos = Vector(
+                    textarea_box["x"] + textarea_box["width"] / 2,
+                    textarea_box["y"] + textarea_box["height"] / 2,
+                ) if textarea_box else Vector(0, 0)
+                await human_click(self.page, start_pos, SUBMIT_BUTTON_SELECTOR, move_duration=0.05)
+                self.logger.debug("[Input] Ghost cursor click on submit button succeeded")
+                button_clicked = True
+            except Exception as pw_err:
+                self.logger.debug(f"[Input] Ghost cursor click failed: {pw_err}, trying locator click...")
+                try:
+                    await submit_button_locator.click(timeout=5000)
+                    button_clicked = True
+                except Exception as click_err2:
+                    self.logger.error(f"[Input] Locator click also failed: {click_err2}")
+
+            if button_clicked:
+                await asyncio.sleep(0.5)
+                try:
+                    is_still_enabled = await submit_button_locator.is_enabled(timeout=2000)
+                    if not is_still_enabled:
+                        self.logger.debug("[Input] Submit button disabled — submission accepted")
+                    else:
+                        self.logger.debug("[Input] Submit button still enabled after click")
+                except Exception:
+                    pass
+        except Exception as click_err:
+            self.logger.error(f"Submit button click failed: {click_err}")
+            await save_error_snapshot(f"submit_button_click_fail_{self.req_id}")
+
+        if not button_clicked:
+            raise Exception("Failed to submit prompt: all click methods failed.")
+
+        await self._check_disconnect(check_client_disconnected, "After Submit")
 
     async def _open_upload_menu_and_choose_file(self, files_list: List[str]) -> bool:
         """Select 'Upload' from the 'Insert assets' menu and set files."""

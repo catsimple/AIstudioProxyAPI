@@ -161,7 +161,7 @@ def _signal_camoufox_process(sig: int) -> bool:
 
 
 async def resume_camoufox_process(warmup_seconds: float = 0.2) -> bool:
-    """Resume a frozen Camoufox process and give it a short warmup window."""
+    """Resume a frozen Camoufox process and wait for it to be fully responsive."""
     cancel_camoufox_freeze()
     if sys.platform == "win32":
         return False
