@@ -696,6 +696,7 @@ async def process_request_with_retry(
 
     max_retries = 3
     attempt = 0
+    page_reloaded = False
     while attempt < max_retries:
         attempt += 1
         try:
@@ -709,6 +710,21 @@ async def process_request_with_retry(
             await GlobalState.rotation_complete_event.wait()
             logger.info(f"[{req_id}] Rotation complete. Retrying request.")
             continue
+        except QuotaExceededError as quota_err:
+            if not page_reloaded:
+                logger.warning(
+                    f"[{req_id}] Quota exceeded, reloading page and retrying (1/1)..."
+                )
+                page = state.page_instance
+                if page and not page.is_closed():
+                    try:
+                        await asyncio.wait_for(page.reload(wait_until="domcontentloaded"), timeout=10.0)
+                        await asyncio.sleep(1)
+                    except Exception as reload_err:
+                        logger.warning(f"[{req_id}] Reload after quota error failed: {reload_err}")
+                page_reloaded = True
+                continue
+            raise
     logger.error(f"[{req_id}] Request failed after {max_retries} retries due to quota.")
     raise Exception(f"Request failed after {max_retries} retries due to quota issues.")
 

@@ -1,4 +1,6 @@
 import asyncio
+import os
+import signal
 from typing import Callable, List
 
 from playwright.async_api import TimeoutError
@@ -80,17 +82,18 @@ class InputController(BaseController):
         legacy_autosize_wrapper, submit_button_locator,
     ):
         """Core submit logic, wrapped for timeout."""
+        await self._ensure_browser_responsive()
         try:
             await asyncio.wait_for(
                 expect_async(prompt_textarea_locator).to_be_visible(),
                 timeout=5.0,
             )
         except Exception:
-            self.logger.info(f"[{self.req_id}] Textarea not visible after 5s, reloading page...")
+            self.logger.info(f"[{self.req_id}] Textarea not visible, reloading page...")
             try:
                 await asyncio.wait_for(
                     self.page.reload(wait_until="domcontentloaded"),
-                    timeout=5.0,
+                    timeout=10.0,
                 )
                 await asyncio.sleep(1)
             except Exception as reload_err:
@@ -195,6 +198,9 @@ class InputController(BaseController):
             raise Exception("Failed to submit prompt: all click methods failed.")
 
         await self._check_disconnect(check_client_disconnected, "After Submit")
+
+    async def _ensure_browser_responsive(self):
+        pass
 
     async def _open_upload_menu_and_choose_file(self, files_list: List[str]) -> bool:
         """Select 'Upload' from the 'Insert assets' menu and set files."""

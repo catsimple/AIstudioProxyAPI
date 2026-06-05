@@ -216,7 +216,7 @@ async def _initialize_browser_and_page():
             await _handle_initial_model_state_and_storage(state.page_instance)
             await enable_temporary_chat_mode(state.page_instance)
             await state.page_instance.bring_to_front()
-            schedule_camoufox_freeze()
+            await schedule_camoufox_freeze()
             state.logger.info("Page initialized successfully.")
         else:
             state.logger.error("Page initialization failed.")

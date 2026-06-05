@@ -171,8 +171,15 @@ async def resume_camoufox_process(warmup_seconds: float = 0.2) -> bool:
     return resumed
 
 
-def freeze_camoufox_process() -> bool:
+async def freeze_camoufox_process() -> bool:
     """Freeze the Camoufox process group with SIGSTOP."""
+    try:
+        from api_utils.server_state import state
+        page = getattr(state, "page_instance", None)
+        if page and not page.is_closed():
+            await page.evaluate("() => 1")
+    except Exception:
+        pass
     return _signal_camoufox_process(signal.SIGSTOP)
 
 
@@ -190,19 +197,19 @@ async def _freeze_after_delay(delay_seconds: float) -> None:
         logger.info(f"[CPU] Idle timer started; freezing in {delay_seconds:.0f}s if no activity.")
         await asyncio.sleep(delay_seconds)
         logger.info("[CPU] Idle period elapsed; freezing Camoufox now.")
-        freeze_camoufox_process()
+        await freeze_camoufox_process()
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.debug(f"[CPU] Idle freeze task failed: {exc}")
 
 
-def schedule_camoufox_freeze(delay_seconds: float = 60.0) -> None:
+async def schedule_camoufox_freeze(delay_seconds: float = 60.0) -> None:
     """Schedule freezing the Camoufox process after an idle delay."""
     global _idle_freeze_task
 
     if delay_seconds <= 0:
-        freeze_camoufox_process()
+        await freeze_camoufox_process()
         return
 
     cancel_camoufox_freeze()

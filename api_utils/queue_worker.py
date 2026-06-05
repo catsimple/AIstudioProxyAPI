@@ -477,6 +477,6 @@ async def queue_worker() -> None:
             if request_item:
                 request_queue.task_done()
             if request_dequeued and state.page_instance and state.is_page_ready and not GlobalState.IS_SHUTTING_DOWN.is_set():
-                schedule_camoufox_freeze()
+                await schedule_camoufox_freeze()
 
     logger.info("--- Queue Worker Stopped ---")

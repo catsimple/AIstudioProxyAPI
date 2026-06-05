@@ -75,7 +75,7 @@ def _build_backend_progress_reasoning_steps() -> List[str]:
         "[SYSTEM] 已接收请求，正在整理上下文...",
         "[SYSTEM] 正在调整参数并选择模型设置...",
         "[SYSTEM] 正在提交提示词到浏览器会话...",
-        "[SYSTEM] 正在等待首个模型输出...",
+        "[SYSTEM] 即将开始输出...",
     ]
 
 
@@ -211,7 +211,7 @@ async def gen_sse_from_aux_stream(
                 GlobalState.CURRENT_STREAM_REQ_ID
                 and GlobalState.CURRENT_STREAM_REQ_ID != req_id
             ):
-                logger.warning(f"[{req_id}] 馃 Zombie Stream Detected! Terminating.")
+                logger.warning(f"[{req_id}] Zombie Stream Detected! Terminating.")
                 break
 
             if GlobalState.QUOTA_EXCEEDED_EVENT.is_set():
@@ -219,19 +219,19 @@ async def gen_sse_from_aux_stream(
 
             if is_response_finalized:
                 logger.warning(
-                    f"[{req_id}] 鈿狅笍 Extraneous message received after response finalization. Ignoring."
+                    f"[{req_id}] Extraneous message received after response finalization. Ignoring."
                 )
                 continue
 
             # Holding Pattern for Recovery
             if GlobalState.IS_RECOVERING:
                 logger.info(
-                    f"[{req_id}] 鈴革笍 System in Recovery Mode. Holding stream open..."
+                    f"[{req_id}] System in Recovery Mode. Holding stream open..."
                 )
                 recovery_wait_start = time.time()
                 while GlobalState.IS_RECOVERING:
                     if time.time() - recovery_wait_start > 120.0:
-                        logger.error(f"[{req_id}] 鉂?Recovery Timed Out. Aborting.")
+                        logger.error(f"[{req_id}] Recovery Timed Out. Aborting.")
                         yield generate_sse_chunk(
                             "\n\n[SYSTEM: Service Recovery Failed. Please retry.]",
                             req_id,
@@ -244,17 +244,17 @@ async def gen_sse_from_aux_stream(
 
                 if GlobalState.IS_RECOVERING:
                     break
-                logger.info(f"[{req_id}] 鈻讹笍 Recovery Complete. Resuming stream.")
+                logger.info(f"[{req_id}] Recovery Complete. Resuming stream.")
 
             if GlobalState.IS_QUOTA_EXCEEDED and not GlobalState.IS_RECOVERING:
                 logger.warning(
-                    f"[{req_id}] 鈿狅笍 Quota exceeded detected. Waiting for recovery initiation..."
+                    f"[{req_id}] Quota exceeded detected. Waiting for recovery initiation..."
                 )
                 await asyncio.sleep(1)
                 if GlobalState.IS_RECOVERING:
                     continue
                 logger.warning(
-                    f"[{req_id}] 鉀?Quota exceeded, waiting for worker to pick up signal..."
+                    f"[{req_id}] Quota exceeded, waiting for worker to pick up signal..."
                 )
                 await asyncio.sleep(2)
                 continue
