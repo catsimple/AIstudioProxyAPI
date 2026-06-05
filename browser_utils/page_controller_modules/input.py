@@ -78,12 +78,18 @@ class InputController(BaseController):
     ):
         """Core submit logic, wrapped for timeout."""
         try:
-            await expect_async(prompt_textarea_locator).to_be_visible(timeout=3000)
+            await asyncio.wait_for(
+                expect_async(prompt_textarea_locator).to_be_visible(),
+                timeout=5.0,
+            )
         except Exception:
-            self.logger.info(f"[{self.req_id}] Textarea not visible, reloading page...")
+            self.logger.info(f"[{self.req_id}] Textarea not visible after 5s, reloading page...")
             try:
-                await self.page.reload(wait_until="domcontentloaded", timeout=10000)
-                await asyncio.sleep(2)
+                await asyncio.wait_for(
+                    self.page.reload(wait_until="domcontentloaded"),
+                    timeout=5.0,
+                )
+                await asyncio.sleep(1)
             except Exception as reload_err:
                 self.logger.warning(f"[{self.req_id}] Reload failed: {reload_err}")
             await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
