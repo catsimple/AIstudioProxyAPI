@@ -200,6 +200,7 @@ async def queue_worker() -> None:
             request_dequeued = True
 
             GlobalState.CURRENT_STREAM_REQ_ID = req_id
+            GlobalState.STREAM_INTERRUPT_EVENT.set()
             logger.info(f"[{req_id}] (Worker) Processing request dequeued.")
 
             if GlobalState.IS_QUOTA_EXCEEDED:

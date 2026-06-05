@@ -61,6 +61,10 @@ class GlobalState:
     # Used to gate consumers and prevent zombie streams from processing data
     CURRENT_STREAM_REQ_ID: Optional[str] = None
 
+    # [INTERRUPT] Event to signal that a new request has arrived and
+    # the current waiting stream should be interrupted
+    STREAM_INTERRUPT_EVENT = asyncio.Event()
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(GlobalState, cls).__new__(cls)

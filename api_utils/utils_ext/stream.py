@@ -438,6 +438,16 @@ async def use_stream_response(
                     logger.info(
                         f"[{req_id}] Waiting for data... ({empty_count}/{max_empty_retries})"
                     )
+                if empty_count >= 100 and GlobalState.STREAM_INTERRUPT_EVENT.is_set():
+                    logger.warning(f"[{req_id}] Waiting interrupted by new request after {empty_count} empty cycles.")
+                    GlobalState.STREAM_INTERRUPT_EVENT.clear()
+                    yield {
+                        "done": True,
+                        "reason": "interrupted_by_new_request",
+                        "body": "",
+                        "function": [],
+                    }
+                    return
                 if empty_count >= max_empty_retries:
                     if GlobalState.IS_RECOVERING:
                         empty_count = 0

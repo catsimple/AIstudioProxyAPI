@@ -77,7 +77,16 @@ class InputController(BaseController):
         legacy_autosize_wrapper, submit_button_locator,
     ):
         """Core submit logic, wrapped for timeout."""
-        await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
+        try:
+            await expect_async(prompt_textarea_locator).to_be_visible(timeout=3000)
+        except Exception:
+            self.logger.info(f"[{self.req_id}] Textarea not visible, reloading page...")
+            try:
+                await self.page.reload(wait_until="domcontentloaded", timeout=10000)
+                await asyncio.sleep(2)
+            except Exception as reload_err:
+                self.logger.warning(f"[{self.req_id}] Reload failed: {reload_err}")
+            await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
         await self._check_disconnect(check_client_disconnected, "After Input Visible")
 
         await prompt_textarea_locator.click(timeout=3000)
