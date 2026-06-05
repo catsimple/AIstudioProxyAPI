@@ -54,7 +54,10 @@ class InputController(BaseController):
                 f"[{self.req_id}] submit_prompt timed out after 120s, reloading page and retrying..."
             )
             try:
-                await self.page.reload(wait_until="domcontentloaded", timeout=15000)
+                await asyncio.wait_for(
+                    self.page.reload(wait_until="domcontentloaded"),
+                    timeout=10.0,
+                )
                 await asyncio.sleep(2)
             except Exception as reload_err:
                 self.logger.error(f"[{self.req_id}] Page reload after timeout failed: {reload_err}")
