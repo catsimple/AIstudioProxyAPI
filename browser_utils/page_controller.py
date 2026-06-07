@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from playwright.async_api import Page as AsyncPage
 from playwright.async_api import expect as expect_async
 
+from config.global_state import GlobalState
 from config import (
     CLEAR_CHAT_BUTTON_SELECTOR,
     CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR,
@@ -155,6 +156,7 @@ class PageController(
         max_retries = 2
         for attempt in range(max_retries):
             try:
+                GlobalState.set_submit_in_progress(True)
                 self.logger.info(
                     f"[{self.req_id}] Filling and submitting prompt (Attempt {attempt + 1}/{max_retries})..."
                 )
@@ -229,8 +231,10 @@ class PageController(
                     raise Exception("Failed to submit prompt: all click methods failed.")
 
                 await self._check_disconnect(check_client_disconnected, "After Submit")
+                GlobalState.set_submit_in_progress(False)
                 return
             except QuotaExceededError:
+                GlobalState.set_submit_in_progress(False)
                 raise
             except Exception as e:
                 self.logger.warning(

@@ -710,6 +710,19 @@ async def process_request_with_retry(
             await GlobalState.rotation_complete_event.wait()
             logger.info(f"[{req_id}] Rotation complete. Retrying request.")
             continue
+        except RuntimeError as e:
+            if "Browser hung" in str(e) and not page_reloaded:
+                logger.warning(f"[{req_id}] Browser hung, reloading page and retrying...")
+                page = state.page_instance
+                if page and not page.is_closed():
+                    try:
+                        await asyncio.wait_for(page.reload(wait_until="domcontentloaded"), timeout=10.0)
+                        await asyncio.sleep(1)
+                    except Exception:
+                        pass
+                page_reloaded = True
+                continue
+            raise
         except QuotaExceededError as quota_err:
             if not page_reloaded:
                 logger.warning(

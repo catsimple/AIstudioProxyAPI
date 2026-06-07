@@ -146,9 +146,15 @@ async def resilient_stream_generator(
                     yield ": auth rotation complete, retrying...\n\n"
                     continue
                 else:
-                    logger.error(f"[{req_id}] Auth rotation failed.")
-                    yield f"data: {json.dumps({'error': 'Auth rotation failed.'}, ensure_ascii=False)}\n\n"
-                    return
+                    logger.warning(f"[{req_id}] Auth rotation failed, trying page reload...")
+                    try:
+                        if page and not page.is_closed():
+                            await asyncio.wait_for(page.reload(wait_until="domcontentloaded"), timeout=10.0)
+                            await asyncio.sleep(1)
+                    except Exception as reload_err:
+                        logger.warning(f"[{req_id}] Page reload after rotation failed: {reload_err}")
+                    yield ": page reloaded after rotation failure, retrying...\n\n"
+                    continue
             except Exception:
                 raise
     finally:

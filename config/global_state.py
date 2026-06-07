@@ -65,6 +65,57 @@ class GlobalState:
     # the current waiting stream should be interrupted
     STREAM_INTERRUPT_EVENT = asyncio.Event()
 
+    # [SUBMIT WATCHDOG] Track submit state for deadlock detection
+    SUBMIT_IN_PROGRESS: bool = False
+    SUBMIT_START_TIME: float = 0.0
+    SUBMIT_WATCHDOG_TASK: Optional[asyncio.Task] = None
+
+    @classmethod
+    def start_submit_watchdog(cls, timeout: float = 10.0):
+        """Start a watchdog that kills Camoufox if submit takes too long."""
+        logger.info(f"[Watchdog] start_submit_watchdog called, timeout={timeout}s")
+        if cls.SUBMIT_WATCHDOG_TASK and not cls.SUBMIT_WATCHDOG_TASK.done():
+            cls.SUBMIT_WATCHDOG_TASK.cancel()
+
+        async def _watchdog():
+            try:
+                logger.info(f"[Watchdog] Started, timeout={timeout}s")
+                await asyncio.sleep(timeout)
+                logger.info(f"[Watchdog] Checking: SUBMIT_IN_PROGRESS={cls.SUBMIT_IN_PROGRESS}, elapsed={time.time() - cls.SUBMIT_START_TIME:.1f}s")
+                if cls.SUBMIT_IN_PROGRESS:
+                    elapsed = time.time() - cls.SUBMIT_START_TIME
+                    if elapsed >= timeout:
+                        logger.warning(
+                            f"[Watchdog] Submit stuck for {elapsed:.1f}s, killing Camoufox"
+                        )
+                        try:
+                            from browser_utils.process_control import _kill_camoufox
+                            _kill_camoufox()
+                        except Exception as kill_err:
+                            logger.error(f"[Watchdog] Kill failed: {kill_err}")
+            except asyncio.CancelledError:
+                logger.debug("[Watchdog] Cancelled")
+
+        try:
+            loop = asyncio.get_running_loop()
+            cls.SUBMIT_WATCHDOG_TASK = loop.create_task(_watchdog())
+            logger.info(f"[Watchdog] Task created on loop {id(loop)}")
+        except RuntimeError as e:
+            logger.error(f"[Watchdog] Failed to start: {e}")
+
+    @classmethod
+    def set_submit_in_progress(cls, in_progress: bool):
+        """Mark submit as in-progress or completed."""
+        cls.SUBMIT_IN_PROGRESS = in_progress
+        if in_progress:
+            cls.SUBMIT_START_TIME = time.time()
+            print(f"[DEBUG] set_submit_in_progress(True), starting watchdog", flush=True)
+            cls.start_submit_watchdog(timeout=7.0)
+        else:
+            print(f"[DEBUG] set_submit_in_progress(False)", flush=True)
+            if cls.SUBMIT_WATCHDOG_TASK and not cls.SUBMIT_WATCHDOG_TASK.done():
+                cls.SUBMIT_WATCHDOG_TASK.cancel()
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(GlobalState, cls).__new__(cls)

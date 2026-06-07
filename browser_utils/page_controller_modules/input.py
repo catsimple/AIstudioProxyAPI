@@ -1,6 +1,7 @@
 import asyncio
 import os
 import signal
+import time
 from typing import Callable, List
 
 from playwright.async_api import TimeoutError
@@ -44,6 +45,7 @@ class InputController(BaseController):
         )
         submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
 
+        GlobalState.set_submit_in_progress(True)
         try:
             await asyncio.wait_for(
                 self._do_submit(prompt, image_list, check_client_disconnected,
@@ -53,18 +55,8 @@ class InputController(BaseController):
             )
         except asyncio.TimeoutError:
             self.logger.warning(
-                f"[{self.req_id}] submit_prompt timed out after 120s, reloading page and retrying..."
+                f"[{self.req_id}] submit_prompt timed out after 120s"
             )
-            try:
-                await asyncio.wait_for(
-                    self.page.reload(wait_until="domcontentloaded"),
-                    timeout=10.0,
-                )
-                await asyncio.sleep(2)
-            except Exception as reload_err:
-                self.logger.error(f"[{self.req_id}] Page reload after timeout failed: {reload_err}")
-                raise
-            await self._safe_reload_page()
             raise
         except Exception as e_input_submit:
             if isinstance(e_input_submit, asyncio.CancelledError):
@@ -75,30 +67,16 @@ class InputController(BaseController):
             if not isinstance(e_input_submit, ClientDisconnectedError):
                 await save_error_snapshot(f"input_submit_error_{self.req_id}")
             raise
-
+        finally:
+            GlobalState.set_submit_in_progress(False)
     async def _do_submit(
         self, prompt: str, image_list: List, check_client_disconnected: Callable,
         prompt_textarea_locator, autosize_wrapper_locator,
         legacy_autosize_wrapper, submit_button_locator,
     ):
         """Core submit logic, wrapped for timeout."""
-        await self._ensure_browser_responsive()
-        try:
-            await asyncio.wait_for(
-                expect_async(prompt_textarea_locator).to_be_visible(),
-                timeout=5.0,
-            )
-        except Exception:
-            self.logger.info(f"[{self.req_id}] Textarea not visible, reloading page...")
-            try:
-                await asyncio.wait_for(
-                    self.page.reload(wait_until="domcontentloaded"),
-                    timeout=10.0,
-                )
-                await asyncio.sleep(1)
-            except Exception as reload_err:
-                self.logger.warning(f"[{self.req_id}] Reload failed: {reload_err}")
-            await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
+        GlobalState.STREAM_INTERRUPT_EVENT.clear()
+        await expect_async(prompt_textarea_locator).to_be_visible(timeout=5000)
         await self._check_disconnect(check_client_disconnected, "After Input Visible")
 
         await prompt_textarea_locator.click(timeout=3000)
